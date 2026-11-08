@@ -11,9 +11,9 @@ Required: Python >= 3.11, Task, the lockstep CLI, the venv with
 lockstep-train installed. Per-language toolchains are REQUIRED exactly when
 an agent of that language exists under agents/ (else reported as optional):
 rust = cargo + the wasm32-wasip2 target; c = wasi-sdk + wit-bindgen.
-LOCKSTEP_API_KEY is REQUIRED when an agent targets an assessment-only
-environment (its engine downloads only with the key) or when the key is set
-but the API rejects it; otherwise optional (`task upload` needs it). The key
+LOCKSTEP_API_KEY is REQUIRED when an agent targets an environment whose
+engine downloads only with the key (every one except a public example) or
+when the key is set but the API rejects it; otherwise optional (`task upload` needs it). The key
 check asks the API (stdlib urllib, short timeout) and never fails when the
 API cannot be reached. Optional always: the keyed engine cache (filled on
 demand).
@@ -192,9 +192,10 @@ def _agent_envs() -> dict[str, str]:
 
 
 def _needs_key(env: str) -> bool:
-    """An assessment-only environment: the API hands its engine only to a
-    signed-in caller, so an anonymous look shows a published mode with no
-    engine to download (the same test `lockstep_train.fetch` refuses on)."""
+    """A gated environment — every one except a public example: the API
+    hands its engine only to a signed-in caller, so an anonymous look shows a
+    published mode with no engine to download (the same test
+    `lockstep_train.fetch` refuses on)."""
     status, payload = _api_post("environment/get", {"id": env})
     if status != 200:
         return False
@@ -226,7 +227,7 @@ def check_api_key() -> Check:
             "LOCKSTEP_API_KEY",
             True,
             False,
-            f"set, {verified} (signs in `task upload` and assessment-only engine downloads)",
+            f"set, {verified} (signs in `task upload` and engine downloads)",
         )
     gated = [(env, agent) for env, agent in _agent_envs().items() if _needs_key(env)]
     if gated:
@@ -235,16 +236,16 @@ def check_api_key() -> Check:
             "LOCKSTEP_API_KEY",
             False,
             True,
-            f"not set — agents/{agent} targets {env}, an assessment-only environment: "
-            "its engine downloads only with your key (info / train / build / match need it)",
+            f"not set — agents/{agent} targets {env}, "
+            "whose engine downloads only with your key (info / train / build / match need it)",
             f"cp .env.example .env, then {MINT_KEY}",
         )
     return Check(
         "LOCKSTEP_API_KEY",
         False,
         False,
-        "not set — `task upload` needs it, and so does every task on an assessment-only "
-        "environment (one a company invited you to)",
+        "not set — `task upload` needs it, and so does every task on an environment a "
+        "company invited you to (its engine downloads only with your key)",
         f"cp .env.example .env, then {MINT_KEY}",
     )
 

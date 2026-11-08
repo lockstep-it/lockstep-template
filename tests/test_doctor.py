@@ -1,5 +1,5 @@
-"""`task doctor`'s API-key check: optional until an agent targets an
-assessment-only environment or the API rejects the key — then required, with
+"""`task doctor`'s API-key check: optional until an agent targets a gated
+environment or the API rejects the key — then required, with
 the fix. The API is stubbed; an unreachable API never fails the check."""
 
 import pytest
@@ -44,7 +44,7 @@ def test_no_key_and_no_gated_agent_is_optional(repo, monkeypatch):
     api(monkeypatch, modes={"open-env": [PUBLIC]})
     c = doctor.check_api_key()
     assert (c.ok, c.required) == (False, False)
-    assert "assessment-only" in c.detail and c.fix
+    assert "invited you to" in c.detail and c.fix
 
 
 def test_no_key_with_an_assessment_only_agent_is_required(repo, monkeypatch):

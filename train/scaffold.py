@@ -1091,7 +1091,7 @@ def gen_lib_rs(cfg: AgentConfig, init) -> str:
 //! Match:  task match AGENT={cfg.name}
 //! Debug:  task match AGENT={cfg.name} LOGS=1 STEP=1
 //!         (prints whatever you `eprintln!`, tagged with seat and tick, and
-//!         pauses after every tick; only on your machine — ranked matches
+//!         pauses after every tick; only on your machine — evaluated matches
 //!         discard it)
 
 mod interface;
@@ -1502,7 +1502,7 @@ def gen_agent_c(cfg: AgentConfig, init) -> str:
  * Match:  task match AGENT={cfg.name}
  * Debug:  task match AGENT={cfg.name} LOGS=1 STEP=1
  *         (prints whatever you fprintf to stderr, tagged with seat and
- *         tick, and pauses after every tick; only on your machine — ranked
+ *         tick, and pauses after every tick; only on your machine — evaluated
  *         matches discard it)
  */
 

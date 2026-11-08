@@ -1,15 +1,15 @@
 """A small, real PPO loop over the generic Lockstep Gymnasium env.
 
 Real in the sense that matters here: it steps the ACTUAL engine wasm through
-``lockstep_train``, with the same physics and the same observations a ranked
-match uses. There is nothing per-environment in it — the env, the spaces and
+``lockstep_train``, with the same physics and the same observations an
+evaluated match uses. There is nothing per-environment in it — the env, the spaces and
 the reward all come from the engine's own declaration. It is not tuned, and a short run produces a weak agent — that is
 expected, and the README says so. What it produces is a genuine policy whose
 weights came from playing the environment, which is what makes the exported ONNX
 worth shipping.
 
 Kept deliberately small (no RL framework) because the interesting part of
-this repo is the train -> export -> bundle -> compete path, not the
+this repo is the train -> export -> bundle -> submit path, not the
 optimizer. Swap this whole loop for your own stack freely: the env is plain
 ``gymnasium.make`` and composes with the standard vector API.
 

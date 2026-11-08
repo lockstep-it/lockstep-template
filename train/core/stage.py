@@ -111,7 +111,7 @@ def stage(
         "# refuses an agent whose declared version does not match the live\n"
         "# environment catalog.\n"
         f"payload_schema_version = {payload_schema_version}\n"
-        "# The ladder this agent targets (environments can have several modes).\n"
+        "# The mode this agent targets (environments can have several).\n"
         f'mode = "{mode}"\n'
         "\n"
         "[artifacts.policy]\n"
