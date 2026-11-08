@@ -52,7 +52,7 @@ thing per environment: its **Interface** step is `task info` rendered as a
 page, and its **Build** step is this README. To look before anyone invites
 you, the public examples at
 [lockstep.it/companies/examples](https://lockstep.it/companies/examples)
-are real assessments you can read end to end and practise on.
+are real assessments you can read end to end and practice on.
 
 Want the long version with real output? [TUTORIAL.md](TUTORIAL.md).
 
