@@ -27,12 +27,13 @@ RELEASES = {
     "two-mode": {"version": "0.7.0", "default_mode": "alpha",
                  "modes": ["alpha", "beta"]},
     # A multi-mode release that (wrongly) omits default_mode: the resolver
-    # must demand MODE= rather than guess a ladder.
+    # must demand MODE= rather than guess a mode.
     "no-default": {"version": "1.0.0", "modes": ["a", "b"]},
     # A single mode needs no default to be unambiguous.
     "solo": {"version": "2.0.0", "modes": ["default"]},
-    # Assessment-only: published, but its engine has no public CDN key —
-    # only an invited candidate (LOCKSTEP_API_KEY) can fetch it.
+    # Gated (every environment but a public example): published, but its
+    # engine has no public CDN key — only a signed-in caller who may see it
+    # (LOCKSTEP_API_KEY) can fetch it.
     "sealed": {"version": "3.0.0", "modes": ["default"], "public": False},
     # Annotated but never published: environment/list carries it with no
     # release on any mode, so `published()` must drop it.

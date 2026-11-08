@@ -6,9 +6,9 @@ The release lives under an UNGUESSABLE directory on the CDN
 (``environments/<slug>/releases/<version>-<token>/<mode>/``), so its path
 is never derived here — it comes from the platform API's ``environment/get``
 (the pinned ``engine_object_key``), which ``lockstep_train.fetch.resolve``
-wraps. Exhibitions answer publicly; an assessment-only environment answers
-an invited candidate through ``LOCKSTEP_API_KEY`` (the key ``task upload``
-already needs). Under that prefix:
+wraps. It answers a signed-in caller who may see the environment — an
+invited candidate, a learner, or anyone on a public example — through
+``LOCKSTEP_API_KEY`` (the key ``task upload`` already needs). Under that prefix:
 
     <prefix>/engine.wasm        the mode's engine — what you train against
     <prefix>/agent-onnx.wasm    the generic ONNX agent shell — what you ship
@@ -101,8 +101,9 @@ class PublishedEnvironment:
     #: Every PUBLISHED mode key (a mode with a release), in platform order.
     modes: tuple[str, ...]
     #: True when at least one published mode's engine is fetchable without an
-    #: invite key (its release names a CDN ``engine_object_key``). False means
-    #: assessment-only: ``LOCKSTEP_API_KEY`` for an invited candidate.
+    #: invite key (its release names a CDN ``engine_object_key``) — a public
+    #: example. False means gated: ``LOCKSTEP_API_KEY`` for a caller who may
+    #: see it (an invited candidate, a learner).
     public: bool
     #: Each published mode's assessment tags (``facet:value`` from the
     #: shared vocabulary, free words last), as the catalog lists them.

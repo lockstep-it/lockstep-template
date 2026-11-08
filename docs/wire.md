@@ -8,7 +8,9 @@ reply are packed into bytes, and the rules every environment keeps.
 It does not say what any particular environment's numbers mean. Each
 environment tells you that itself, from the same declaration described here:
 
-- its **Interface** page on [exhibitions.lockstep.it](https://exhibitions.lockstep.it),
+- its **Interface** step in the assessment workspace on
+  [assignments.lockstep.it](https://assignments.lockstep.it) (and, for a
+  public example, on [lockstep.it/companies/examples](https://lockstep.it/companies/examples)),
 - `task info ENV=<slug>` in the agent template, which prints the same page in
   your terminal,
 - the interface file `task create-agent` generates for your agent
@@ -378,7 +380,7 @@ fixed by the declaration:
 - **It tells you what it did, locally.** A graph cannot print, so the shell
   prints for it when the agent's environment carries
   `LOCKSTEP_AGENT_LOGS=1` — which `task match LOGS=1` (the CLI's
-  `--agent-logs`) sets and a ranked match never does: what it feeds the
+  `--agent-logs`) sets and an evaluated match never does: what it feeds the
   model, every observation by slice or column name each tick, the action it
   sent in declared units, and the reason whenever it played the neutral
   action instead (a missing model, an output of the wrong width, an
@@ -466,7 +468,7 @@ agent. For orientation, the rest of a match:
 |---|---|---|
 | the agent world | The WebAssembly component interface every agent implements: `init(seat-init)` once, then `on-tick(view) -> input` every tick | `wit/` in the template, vendored into every Rust and C agent it scaffolds |
 | the seed | Randomness the platform draws for each match and hands to the engine; your agent never sees it | the replay page and `task match` report which seed ran |
-| the replay archive | The whole match — every tick the environment recorded — in one file | `out/archive.bin` after `task match`; drop it on [exhibitions.lockstep.it/replay](https://exhibitions.lockstep.it/replay) |
+| the replay archive | The whole match — every tick the environment recorded — in one file | `out/archive.bin` after `task match`; drop it on [assignments.lockstep.it/replay](https://assignments.lockstep.it/replay) |
 | session metrics | The numbers an episode ends with, labelled by the `MetricSpec`s above | the end of `task match`, `task report`, a hiring report |
 | assessment tags | The `facet:value` words in `meta.tags` (skill, level, domain) | `task envs`, the catalog filters |
 

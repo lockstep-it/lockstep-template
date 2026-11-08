@@ -1,9 +1,9 @@
 # Lockstep agent template
 
 Build an agent for any [Lockstep](https://lockstep.it) environment, watch it
-play a real local match, and upload it to compete — from nothing but this
-repo. The engine you build against is the *same WASM binary* that runs
-ranked matches, and it **documents itself**: goal, reward, what ends an
+play a real local match, and submit it to the assessment a company sent you
+— from nothing but this repo. The engine you build against is the *same WASM
+binary* the platform evaluates you on, and it **documents itself**: goal, reward, what ends an
 episode, how you are scored, every observation with its slices or columns
 and their units. `task create-agent` turns that self-description into a
 ready-to-edit agent project — every field named, every bound stated, typed
@@ -25,7 +25,7 @@ level, the domain) — nothing is named in this repo, so `ENV=` is always
 yours to pass.
 
 That ends with `out/archive.bin`: a whole match, scored by the real engine.
-Drop it on <https://exhibitions.lockstep.it/replay> to watch it. Then:
+Drop it on <https://assignments.lockstep.it/replay> to watch it. Then:
 
 ```sh
 task info ENV=go1-beacon         # what the environment IS — the brief and the wire, in this terminal
@@ -35,7 +35,7 @@ task train AGENT=my-bot          # or: a short PPO run → ONNX → parity check
 task train AGENT=my-bot RECIPE=supervised   # or: fit the truth the environment reveals (data environments)
 task match AGENT=my-bot          # your agent in every seat, archived to out/archive.bin
 task match AGENT=my-bot LOGS=1 STEP=1   # debug: your agent's log lines, one tick at a time
-task upload AGENT=my-bot         # submit your final bundle (needs LOCKSTEP_API_KEY in .env)
+task upload AGENT=my-bot ASSESSMENT=<id>   # submit your final bundle (needs LOCKSTEP_API_KEY in .env)
 ```
 
 The unit of work is an **agent**: `agents/<name>/`, scaffolded by
@@ -46,10 +46,13 @@ omitted whenever exactly one agent exists. Engines download themselves
 into a keyed cache (`out/cache/<env>/<mode>/`) the first time something
 needs one.
 
-Browse the catalog at
-[exhibitions.lockstep.it](https://exhibitions.lockstep.it); each
-environment's **Interface** tab is `task info` rendered as a page, and its
-**Practice** tab is this README, per environment.
+Your assessment workspace on
+[assignments.lockstep.it](https://assignments.lockstep.it) shows the same
+thing per environment: its **Interface** step is `task info` rendered as a
+page, and its **Build** step is this README. To look before anyone invites
+you, the public examples at
+[lockstep.it/companies/examples](https://lockstep.it/companies/examples)
+are real assessments you can read end to end and practice on.
 
 Want the long version with real output? [TUTORIAL.md](TUTORIAL.md).
 
@@ -81,9 +84,8 @@ the generic agent shell as WASM from the release). The
 [hand-written wasm track](#the-wasm-story) is one `task setup LANGS=rust`
 (or `LANGS=c`) away.
 
-An API key, for `task upload` — and for everything on an assessment-only
-environment (one a company invited you to), whose engine downloads only with
-it. Copy `.env.example` to `.env` and fill in `LOCKSTEP_API_KEY` (create a key
+An API key, for `task upload` — and for everything on an environment a
+company invited you to, whose engine downloads only with it. Copy `.env.example` to `.env` and fill in `LOCKSTEP_API_KEY` (create a key
 on the Authorization page at lockstep.it); `task doctor` says whether you need
 it and whether the API accepts it.
 
@@ -101,14 +103,14 @@ it and whether the API accepts it.
 | `task build AGENT=` | Build the bundle without training: python exports YOUR `policy.py`; rust/c compile the wasm component. |
 | `task match AGENT= OPPONENTS= LOGS=1 STEP=1 UNTIL=` | A real local match through the CLI, archived to `out/archive.bin` and reported the way the grader would show it. Your agent takes every seat, or `OPPONENTS="bot-2 bot-3"` seats your other agents beside it. `LOGS=1` / `STEP=1` / `UNTIL=N` are for [debugging](#debugging-your-agent). |
 | `task report ARCHIVE=` | What the grader would show for a local match, read off its archive (default `out/archive.bin`): pass/fail, score, the headline metrics, then every metric with its label and unit. |
-| `task upload AGENT= ASSESSMENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle. `ASSESSMENT=<id>` makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints the exact command) — final; `APPROVE=1` skips the confirmation prompt. Without `ASSESSMENT=` it is a plain upload to the ladder and never a submission. |
+| `task upload AGENT= ASSESSMENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle. `ASSESSMENT=<id>` makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints the exact command) — final; `APPROVE=1` skips the confirmation prompt. Without `ASSESSMENT=` it is a plain build: a learner runs it on the suite from the Submit step, and it is never a submission (a candidate's plain upload is refused). |
 | `task test` | The template's own tests (hermetic + engine-backed + the wire references vs the spec goldens). |
 
 ## Debugging your agent
 
 `task match` can show you what your agent sees and decides, one tick at a
-time. All of it happens on your machine: in ranked, assessment and learner
-matches the platform throws away anything an agent prints, so leaving a log
+time. All of it happens on your machine: in assessment and learner matches
+the platform throws away anything an agent prints, so leaving a log
 line in costs nothing but a little time.
 
 ```sh
@@ -220,7 +222,7 @@ unexplained — ask its maintainers.
 <summary><strong>Bring your own training stack</strong></summary>
 
 The training loop in `train/` is deliberately small — the interesting part of
-this repo is the create → build → compete path, not the optimizer. The env
+this repo is the create → build → submit path, not the optimizer. The env
 underneath is plain Gymnasium, provided by `lockstep-train`
 (`pip install lockstep-train`):
 
@@ -303,8 +305,8 @@ steps/second.
 
 **An agent for another mode**
 
-Some environments publish several modes — separate ladders with separate
-engines; `task envs` shows each environment's modes and `task info
+Some environments publish several modes — separate environments with
+separate engines; `task envs` shows each environment's modes and `task info
 ENV=<slug>` describes them. A mode is part of an agent's identity, fixed at
 create time:
 
@@ -401,7 +403,7 @@ task build AGENT=my-bot                        # rebuild against the new release
 
 The platform API names the current release (its directory on the CDN is
 unguessable, so the path is never derived from the slug). For an
-assessment-only environment the API answers only invited candidates — put
+environment you were invited to the API answers only signed-in callers — put
 your key in `.env` as `LOCKSTEP_API_KEY` (the same one `task upload` uses).
 The staged bundle declares the payload schema version read from the engine
 itself, so the api will refuse a stale bundle rather than let it misread
@@ -531,9 +533,9 @@ the neutral action until you edit it. No ONNX, no Python at match time —
 `on-tick` in, action out.
 
 Determinism is the platform's core bet: the engine is bit-identical across
-machines, so a local match IS a ranked match with different seats. The
+machines, so a local match IS an evaluated match with different seats. The
 archive your match writes (`out/archive.bin`) drops straight onto
-[exhibitions.lockstep.it/replay](https://exhibitions.lockstep.it/replay).
+[assignments.lockstep.it/replay](https://assignments.lockstep.it/replay).
 
 </details>
 

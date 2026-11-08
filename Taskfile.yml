@@ -12,7 +12,7 @@
 # and the engine wasm's own declaration describes the whole interface.
 # No environment is named here, not even as a default: `task envs` asks the
 # platform what is published, and ENV=<slug> is always yours to pass.
-# Browse the catalog: https://exhibitions.lockstep.it
+# See an assessment end to end: https://lockstep.it/companies/examples
 version: "3"
 
 # Print what the task SAYS, not the shell line that says it. This is a
@@ -109,7 +109,7 @@ tasks:
       - python3 -m train.doctor
 
   quickstart:
-    desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on exhibitions.lockstep.it/replay. ENV="
+    desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on assignments.lockstep.it/replay. ENV="
     vars:
       NAME: '{{.NAME | default "my-bot"}}'
     preconditions:
@@ -125,7 +125,7 @@ tasks:
         vars: { AGENT: "{{.NAME}}" }
       - 'echo ""'
       - 'echo "quickstart: done — out/archive.bin is a real {{.ENV}} match with agents/{{.NAME}} in every seat."'
-      - 'echo "Watch it:   drop out/archive.bin on https://exhibitions.lockstep.it/replay"'
+      - 'echo "Watch it:   drop out/archive.bin on https://assignments.lockstep.it/replay"'
       - 'echo "Read it:    task info ENV={{.ENV}}    (the brief and the wire, in this terminal)"'
       - 'echo "Make it yours: edit agents/{{.NAME}}/policy.py, then task build AGENT={{.NAME}}"'
       - 'echo "Train it:      task train AGENT={{.NAME}}  then task match, then task upload"'
@@ -225,7 +225,7 @@ tasks:
           lockstep archive report out/archive.bin
         fi
         echo ""
-        echo "Watch it: drop out/archive.bin on https://exhibitions.lockstep.it/replay"
+        echo "Watch it: drop out/archive.bin on https://assignments.lockstep.it/replay"
         echo "Read it again any time: task report   (ARCHIVE=<path> for another archive)"
 
   report:
@@ -252,7 +252,7 @@ tasks:
         lockstep archive report "{{.ARCHIVE}}" $DECL_ARGS
 
   upload:
-    desc: "Upload an agent's bundle — plus its source as an employer-visible archive. ASSESSMENT=<id> makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints this exact command); it is final. Without ASSESSMENT= the upload is a plain upload (a ladder build) and never a submission. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
+    desc: "Upload an agent's bundle — plus its source as an employer-visible archive. ASSESSMENT=<id> makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints this exact command); it is final. Without ASSESSMENT= the upload is a plain build — allowed for a learner (run it on the suite from the Submit step) and never a submission; a candidate's plain upload is refused. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
     preconditions:
       - sh: command -v lockstep
         msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"

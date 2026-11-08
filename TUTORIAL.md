@@ -1,4 +1,4 @@
-# Tutorial: from a clean machine to the ladder
+# Tutorial: from a clean machine to a submission
 
 This walks the whole path with real captured output: what the environment
 is, an agent scaffolded from the engine's own declaration, a hand-written
@@ -21,7 +21,7 @@ running checks… (the venv check imports the training stack; give it a moment)
   ✓ lockstep CLI      lockstep 0.1.4 at ~/.cargo/bin/lockstep
   ✗ venv              no .venv/ yet
     fix → task setup   (creates .venv and installs the training stack)
-  ✓ LOCKSTEP_API_KEY  set, verified (signs in `task upload` and assessment-only engine downloads)
+  ✓ LOCKSTEP_API_KEY  set, verified (signs in `task upload` and engine downloads)
   · Rust toolchain    not installed — only needed for LANG=rust agents
     fix → task setup LANGS=rust   (or https://rustup.rs then: rustup target add wasm32-wasip2)
   · C toolchain       wasi-sdk + wit-bindgen missing — only needed for LANG=c agents
@@ -45,7 +45,7 @@ that language exists under `agents/`.
 - [Data environments: the supervised recipe](#data-environments-the-supervised-recipe)
 - [Part 4 — reading a match](#part-4--reading-a-match)
 - [Debugging: logs, stepping, reruns](#debugging-logs-stepping-reruns)
-- [Part 5 — compete](#part-5--compete)
+- [Part 5 — submit](#part-5--submit)
 - [The advanced track: Rust and C](#the-advanced-track-rust-and-c)
 - [Two seats learning at once](#two-seats-learning-at-once)
 - [Where to go from here](#where-to-go-from-here)
@@ -60,7 +60,7 @@ runs `setup` → `create-agent` → `build` → `match` back to back and ends wi
 
 ```
 quickstart: done — out/archive.bin is a real go1-beacon match with agents/my-bot in every seat.
-Watch it:   drop out/archive.bin on https://exhibitions.lockstep.it/replay
+Watch it:   drop out/archive.bin on https://assignments.lockstep.it/replay
 Read it:    task info ENV=go1-beacon    (the brief and the wire, in this terminal)
 Make it yours: edit agents/my-bot/policy.py, then task build AGENT=my-bot
 Train it:      task train AGENT=my-bot  then task match, then task upload
@@ -173,14 +173,14 @@ same way, with its unit and meaning (and a column whose unit is `code`
 carries its code table right there); a `HOW YOU ARE SCORED` block names
 every metric the report will show, and a `TAGS` line the mode's
 assessment tags. The
-same declaration renders as the environment's
-[Interface tab](https://exhibitions.lockstep.it/environment/go1-beacon/interface);
+same declaration renders as the Interface step of your assessment
+workspace on [assignments.lockstep.it](https://assignments.lockstep.it);
 `python -m lockstep_train.info --env go1-beacon` prints it without
 downloading anything. The first `task info` also fetched the release into
 the keyed cache (`out/cache/go1-beacon/default/`) — nothing else will ever
 download it again until the release changes.
 
-Multi-mode environments take `MODE=` — separate ladders with separate
+Multi-mode environments take `MODE=` — separate environments with separate
 engines; `task envs` lists each environment's modes and `task info
 ENV=<slug>` describes them. The cache keys on (environment, mode), so
 nothing ever clobbers anything.
@@ -282,7 +282,7 @@ task match AGENT=walker
 match finished: 13 frames, final tick 12, rankings [0], winner None — archive out/archive.bin (6437 bytes)
         metrics: [ score 4.87, success 0, reached 0, max-tilt 0.196, energy 349, pushes 2, … ]
 ✓ match archived → out/archive.bin
-Watch it: drop out/archive.bin on https://exhibitions.lockstep.it/replay
+Watch it: drop out/archive.bin on https://assignments.lockstep.it/replay
 ```
 
 (Condensed — the CLI prints every metric as a struct.) Thirteen frames:
@@ -400,7 +400,7 @@ refuses with that reason instead of training on nothing.
 ## Part 4 — reading a match
 
 The archive is the whole match, deterministically replayable. Drop
-`out/archive.bin` on <https://exhibitions.lockstep.it/replay> to watch it rendered
+`out/archive.bin` on <https://assignments.lockstep.it/replay> to watch it rendered
 (its **View results** button shows the graded view before playback even
 starts), or read the same thing in the terminal — `task match` prints it
 at the end, and `task report` prints it again for any archive
@@ -470,10 +470,10 @@ Every run of `task match` is the same match: the seed is fixed, and your
 agent's own randomness is seeded from it. What you see at tick 12 today is
 what you see at tick 12 tomorrow, until you change the agent.
 
-## Part 5 — compete
+## Part 5 — submit
 
 ```sh
-task upload AGENT=walker
+task upload AGENT=walker ASSESSMENT=<id>
 ```
 
 ```
@@ -490,15 +490,19 @@ uploaded bundle agents/…/8c7b581b54e499ae….wasm (1199629 bytes, sha256 7e149
 "verified"` is the line that matters: the platform re-ran your bundle
 against the live engine and accepted it, payload schema and all.)
 
-Your agent joins the arena pool and shows up on the environment's
-**Your agents** tab. Re-upload as a revision with
-`task upload AGENT=walker AGENT_ID=<id>`.
+The upload that names your **hiring assessment** — the exact command,
+id included, is on the assessment's Ship step — is your submission. It
+asks you to confirm first, it is final, and later uploads to it are
+refused, so `task match` until you are happy first. Then the Result step
+fills in as the scenarios run.
 
-If you are here for a **hiring assessment**: the upload that names it —
-`task upload AGENT=walker ASSESSMENT=<id>`, the exact command is on the
-assessment's Ship step — is your submission. It is final and later uploads
-to it are refused, so `task match` until you are happy first. An upload
-without `ASSESSMENT=` is a plain upload and never a submission. By default it also
+If a company gave you **learner access** instead, upload without
+`ASSESSMENT=` — `task upload AGENT=walker` — and run the build on the
+suite from the Submit step, as often as you like; re-upload as a revision
+with `task upload AGENT=walker AGENT_ID=<id>`. Anyone else's upload that
+names no assessment is refused: there is nothing else it could be.
+
+By default an upload also
 sends the text files under `agents/<name>/` as an employer-visible source
 archive — see the README's
 [assessment recipe](README.md#recipes) for exactly what the employer
@@ -595,8 +599,8 @@ That is the neutral stance tipping over: the quaternion is `wxyz`, and its
 tick 12, the fall Part 2 described.
 
 Every line is tagged with the seat and tick it was written in. Print as much
-as you like while you work: nothing leaves your machine, and ranked matches
-throw agent output away.
+as you like while you work: nothing leaves your machine, and evaluated
+matches throw agent output away.
 
 ## Two seats learning at once
 
