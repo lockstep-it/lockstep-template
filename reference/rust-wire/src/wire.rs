@@ -550,4 +550,3 @@ fn checked_numel(shape: &[u32]) -> Option<usize> {
         .try_fold(1usize, |n, &d| n.checked_mul(d as usize))
         .map(|n| n.max(1))
 }
-
