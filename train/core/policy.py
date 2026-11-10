@@ -283,12 +283,20 @@ def actions_to_env(action: np.ndarray, action_space: spaces.Box) -> np.ndarray:
     plays a completely different action from the one that earned the
     training return. That is exactly how a go1 policy scored 80 in
     training and 0 on every sealed seed.
+
+    A non-finite output (NaN, ±inf) is 0 before anything else, as in the
+    shell: the neutral (the midpoint of a bounded range), never a range
+    end. ``tests/fixtures/policy/action_mapping.json`` is the shared golden
+    both sides are tested against.
     """
-    a = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
+    a = np.asarray(action, dtype=np.float32)
+    a = np.clip(np.where(np.isfinite(a), a, np.float32(0.0)), -1.0, 1.0)
     low = np.asarray(action_space.low, dtype=np.float32)
     high = np.asarray(action_space.high, dtype=np.float32)
     bounded = (np.abs(low) < _OPEN_BOUND) & (np.abs(high) < _OPEN_BOUND)
-    scaled = low + (a + 1.0) * 0.5 * (high - low)
+    # An open element's span overflows; np.where discards it.
+    with np.errstate(over="ignore", invalid="ignore"):
+        scaled = low + (a + 1.0) * 0.5 * (high - low)
     return np.where(bounded, scaled, a).astype(np.float32)
 
 
