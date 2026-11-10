@@ -1,0 +1,140 @@
+{
+  "spec": "docs/wire.md, 'The ONNX signature': each declared action's [-1, 1] output is clamped to [-1, 1] and mapped affinely onto that element's declared bounds; an element whose bound is open passes through unscaled; a non-finite output is 0 (the neutral). u8 observations are fed as f32 divided by 255.",
+  "encoding": "Non-finite numbers are the strings \"nan\", \"inf\" and \"-inf\". Every number is an IEEE-754 binary32 value; `expected` is exact, computed in f32 as low + (output + 1) * 0.5 * (high - low).",
+  "actions": [
+    {
+      "case": "zero is the midpoint",
+      "output": 0.0,
+      "low": -1.0,
+      "high": 1.0,
+      "expected": 0.0
+    },
+    {
+      "case": "-1 is the low bound",
+      "output": -1.0,
+      "low": -0.863,
+      "high": 0.863,
+      "expected": -0.8629999756813049
+    },
+    {
+      "case": "+1 is the high bound",
+      "output": 1.0,
+      "low": -2.818,
+      "high": -0.888,
+      "expected": -0.8880000114440918
+    },
+    {
+      "case": "affine inside the range",
+      "output": 0.5,
+      "low": 0.0,
+      "high": 10.0,
+      "expected": 7.5
+    },
+    {
+      "case": "affine, asymmetric range",
+      "output": 0.3,
+      "low": -1000.0,
+      "high": 1000.0,
+      "expected": 300.0
+    },
+    {
+      "case": "affine, small negative",
+      "output": -0.25,
+      "low": -0.686,
+      "high": 4.501,
+      "expected": 1.2591248750686646
+    },
+    {
+      "case": "above 1 clamps to the high bound",
+      "output": 7.0,
+      "low": 0.0,
+      "high": 1.0,
+      "expected": 1.0
+    },
+    {
+      "case": "below -1 clamps to the low bound",
+      "output": -7.0,
+      "low": 0.0,
+      "high": 1.0,
+      "expected": 0.0
+    },
+    {
+      "case": "NaN output is 0, the midpoint",
+      "output": "nan",
+      "low": 0.0,
+      "high": 10.0,
+      "expected": 5.0
+    },
+    {
+      "case": "+inf output is 0, the midpoint (not the high bound)",
+      "output": "inf",
+      "low": 0.0,
+      "high": 10.0,
+      "expected": 5.0
+    },
+    {
+      "case": "-inf output is 0, the midpoint (not the low bound)",
+      "output": "-inf",
+      "low": 0.0,
+      "high": 10.0,
+      "expected": 5.0
+    },
+    {
+      "case": "both bounds open: passes the value through",
+      "output": 0.25,
+      "low": "-inf",
+      "high": "inf",
+      "expected": 0.25
+    },
+    {
+      "case": "both bounds open: still clamped to [-1, 1]",
+      "output": 7.0,
+      "low": "-inf",
+      "high": "inf",
+      "expected": 1.0
+    },
+    {
+      "case": "both bounds open: NaN is 0",
+      "output": "nan",
+      "low": "-inf",
+      "high": "inf",
+      "expected": 0.0
+    },
+    {
+      "case": "high bound open: passes through",
+      "output": 0.25,
+      "low": 0.0,
+      "high": "inf",
+      "expected": 0.25
+    },
+    {
+      "case": "low bound open: passes through, clamped",
+      "output": -3.0,
+      "low": "-inf",
+      "high": 0.0,
+      "expected": -1.0
+    }
+  ],
+  "observations_u8": [
+    {
+      "byte": 0,
+      "expected": 0.0
+    },
+    {
+      "byte": 1,
+      "expected": 0.003921568859368563
+    },
+    {
+      "byte": 128,
+      "expected": 0.501960813999176
+    },
+    {
+      "byte": 254,
+      "expected": 0.9960784316062927
+    },
+    {
+      "byte": 255,
+      "expected": 1.0
+    }
+  ]
+}

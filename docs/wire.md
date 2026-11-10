@@ -172,6 +172,11 @@ every environment emits — `score`, `success`, `ticks`, `bad-inputs`,
   product(shape)` bytes exactly. Rank 0 means one element.
 - Observations and actions appear in **declared order** with **exact byte
   lengths** in every `View` and `Input`.
+- A reader **refuses** a `ValueSpec` whose `dtype size × product(shape)`
+  doesn't fit its own address size (on wasm32, a few large axes are enough),
+  and checks every declared count against the bytes actually remaining
+  **before** allocating for it. A hostile or corrupt `SeatInit` must fail to
+  decode, never wrap a size or allocate from it.
 
 ```
 SliceSpec  : name str | doc str | unit str | start u32 | len u32
@@ -367,16 +372,32 @@ fixed by the declaration:
   single declared action may also be named `action`), shape `[1, *shape]`,
   `f32`, **in `[-1, 1]`**. The shell clamps each element to `[-1, 1]` and
   maps it affinely onto that element's declared bounds (per element when the
-  declaration has per-element bounds); an element with an open bound passes
-  through unscaled. This is what a tanh-headed policy trained with
-  `lockstep-train` — whose action space is the same normalized box — needs:
-  training and a live match are the same computation. A graph that emits
-  raw joint angles instead of `[-1, 1]` is silently clamped to the ends of
-  every range.
-- **Shapes are exact.** An output whose element count matches but whose
-  shape does not (a transposed `[40, 64]` for a declared `[64, 40]`) is
-  refused by the shell and by `lockstep-train`'s encoder; it never becomes a
-  silently-misread action.
+  declaration has per-element bounds), `low` at -1 and `high` at 1; an
+  element with an open bound passes through unscaled, and a **non-finite
+  output (NaN or ±inf) is 0**, the neutral, before any of that. This is what
+  a tanh-headed policy needs. `lockstep-train`'s action space is the
+  *declared* bounds, so a training loop must step the environment through
+  this same map (the template's does), or training and a live match are
+  different computations. A graph that emits raw joint angles instead of
+  `[-1, 1]` is silently clamped to the ends of every range.
+- **The maps are pinned by golden vectors.** `tests/fixtures/policy/
+  action_mapping.json` gives exact `f32` results for both maps above (the
+  action map and `u8` ÷ 255), edge cases included. Any implementation, a
+  shell or a trainer, in any language, should test against it; the Rust
+  crate exposes it as `policy::ACTION_MAPPING_GOLDEN_JSON`.
+- **An open action bound is `±inf`, never a huge finite number.** A trainer
+  whose action space can't hold infinity stands in the dtype's range and
+  treats any magnitude at or above `1e30` as open; the shell treats only
+  infinity as open. They agree on every bound that is infinite or below
+  `1e30`, so a declaration must not use a finite action bound of magnitude
+  `1e30` or more. Environments check this in their tests.
+- **Emit each output in its declared shape.** The shell (and
+  `lockstep-train`'s encoder) check an output's element **count**, not its
+  shape: a transposed `[40, 64]` for a declared `[64, 40]` has the right
+  count, is read row-major as the declared shape, and so becomes a
+  scrambled action rather than a refusal. Export the graph with the declared
+  shape (the template's export does); a shape check in the shell is planned
+  for its next release.
 - **It tells you what it did, locally.** A graph cannot print, so the shell
   prints for it when the agent's environment carries
   `LOCKSTEP_AGENT_LOGS=1` — which `task match LOGS=1` (the CLI's

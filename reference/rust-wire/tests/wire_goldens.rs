@@ -238,3 +238,32 @@ fn input_golden_reencodes_byte_for_byte() {
     let encoded = encode_input(&[f32_bytes(&[0.25, -0.75, 1.0]), 2i32.to_le_bytes().to_vec()]);
     assert_eq!(encoded, INPUT, "hand encoder must match the golden bytes");
 }
+
+/// A hostile declaration: one observation whose shape is 2^96 elements, more
+/// than any address space. It must fail to decode, never wrap or panic.
+#[test]
+fn a_shape_too_large_for_the_address_space_is_refused() {
+    let mut region = Vec::new();
+    region.extend_from_slice(&1u16.to_le_bytes());
+    region.push(b'v');
+    region.extend_from_slice(&0u16.to_le_bytes());
+    region.push(0); // f32
+    region.push(3); // rank
+    for _ in 0..3 {
+        region.extend_from_slice(&u32::MAX.to_le_bytes());
+    }
+    region.extend_from_slice(&(-1.0f32).to_le_bytes());
+    region.extend_from_slice(&1.0f32.to_le_bytes());
+    for has_elem_bounds in [0u8, 1] {
+        let mut r = region.clone();
+        r.push(has_elem_bounds);
+        let mut msg = Vec::new();
+        msg.extend_from_slice(b"LSTI");
+        msg.extend_from_slice(&1u32.to_le_bytes());
+        msg.extend_from_slice(&0u32.to_le_bytes());
+        msg.extend_from_slice(&1u32.to_le_bytes());
+        msg.extend_from_slice(&(r.len() as u32).to_le_bytes());
+        msg.extend_from_slice(&r);
+        assert!(SeatInit::decode(&msg).is_err());
+    }
+}

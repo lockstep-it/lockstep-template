@@ -18,6 +18,7 @@ the pinned release into that cache only when nothing is found.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import platform
 import shutil
@@ -39,6 +40,42 @@ WASI_SDK_BASE = "https://github.com/WebAssembly/wasi-sdk/releases/download"
 #: wit-bindgen pin for the cargo fallback install (any recent works; the
 #: scaffold's build script only uses `wit-bindgen c`).
 WIT_BINDGEN_VERSION = "0.46.0"
+
+#: sha256 of every archive this module downloads, per release asset. A
+#: download that doesn't match is deleted and refused: these are compilers
+#: and code generators, run on your machine. Bumping a version above means
+#: recording its hashes here (wit-bindgen's are on each GitHub release asset;
+#: wasi-sdk 25's were computed from the release downloads, 2026-11-10).
+WASI_SDK_SHA256 = {
+    "wasi-sdk-25.0-arm64-linux": "47fccad8b2498f2239e05e1115c3ffc652bf37e7de2f88fb64b2d663c976ce2d",
+    "wasi-sdk-25.0-arm64-macos": "e1e529ea226b1db0b430327809deae9246b580fa3cae32d31c82dfe770233587",
+    "wasi-sdk-25.0-x86_64-linux": "52640dde13599bf127a95499e61d6d640256119456d1af8897ab6725bcf3d89c",
+    "wasi-sdk-25.0-x86_64-macos": "55e3ff3fee1a15678a16eeccba0129276c9f6be481bc9c283e7f9f65bf055c11",
+    "wasi-sdk-25.0-x86_64-windows": "ebd4868f95a6e764bf29283e3bdf54df0df3902a29737176da9c17da218b939b",
+}
+WIT_BINDGEN_SHA256 = {
+    "wit-bindgen-0.46.0-aarch64-linux.tar.gz": "37879138d1703f4063d167e882d3ecef24abd2df666d92a95bc5f8338644bfb4",
+    "wit-bindgen-0.46.0-aarch64-macos.tar.gz": "dc96da8f3d12bf5e2e3e3b00ce1474d2a8e77e36088752633380f0c85e18632c",
+    "wit-bindgen-0.46.0-x86_64-linux.tar.gz": "8f426d9b0ed0150c71feea697effe4b90b1426a49e22e48bc1d4f4c6396bf771",
+    "wit-bindgen-0.46.0-x86_64-macos.tar.gz": "98767eb96f2a181998fa35a1df932adf743403c5f621ed6eedaa7d7c0533d543",
+    "wit-bindgen-0.46.0-x86_64-windows.zip": "95c6380ec7c1e385be8427a2da1206d90163fd66b6cbb573a516390988ccbad2",
+}
+
+
+def download_verified(url: str, dest: Path, sha256: str) -> None:
+    """Download ``url`` to ``dest``, refusing (and deleting) it unless its
+    sha256 is ``sha256``."""
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(url) as resp, open(dest, "wb") as out:
+        while chunk := resp.read(1 << 20):
+            digest.update(chunk)
+            out.write(chunk)
+    if digest.hexdigest() != sha256:
+        dest.unlink(missing_ok=True)
+        raise SystemExit(
+            f"checksum mismatch for {url}: expected sha256 {sha256}, got "
+            f"{digest.hexdigest()}. Nothing was installed."
+        )
 
 
 def _wasi_sdk_asset() -> str:
@@ -85,12 +122,17 @@ def install_wasi_sdk() -> Path:
     if found:
         return found
     asset = _wasi_sdk_asset()
+    expected = WASI_SDK_SHA256.get(asset)
+    if expected is None:
+        raise SystemExit(
+            f"no recorded checksum for {asset}: install wasi-sdk {WASI_SDK_VERSION}+ "
+            "yourself (https://github.com/WebAssembly/wasi-sdk/releases) and set WASI_SDK"
+        )
     url = f"{WASI_SDK_BASE}/wasi-sdk-{WASI_SDK_VERSION}/{asset}.tar.gz"
     TOOLCHAINS.mkdir(parents=True, exist_ok=True)
     tarball = TOOLCHAINS / f"{asset}.tar.gz"
     print(f"→ downloading {url}", file=sys.stderr)
-    with urllib.request.urlopen(url) as resp:
-        tarball.write_bytes(resp.read())
+    download_verified(url, tarball, expected)
     with tarfile.open(tarball) as tf:
         tf.extractall(TOOLCHAINS, filter="data")
     tarball.unlink()
@@ -125,10 +167,14 @@ def install_wit_bindgen() -> str:
     archive = TOOLCHAINS / asset
     print(f"→ downloading {url}", file=sys.stderr)
     try:
-        with urllib.request.urlopen(url) as resp:
-            archive.write_bytes(resp.read())
+        expected = WIT_BINDGEN_SHA256.get(asset)
+        if expected is None:
+            # No prebuilt (with a recorded checksum) for this machine.
+            raise OSError(f"no recorded checksum for {asset}")
+        download_verified(url, archive, expected)
     except OSError:
-        # No prebuilt for this machine (or offline registry) — cargo fallback.
+        # No prebuilt for this machine (or offline registry) — cargo fallback
+        # (crates.io checks what it serves against the registry index).
         if not shutil.which("cargo"):
             raise SystemExit(
                 f"could not download {url} and cargo is unavailable — install "

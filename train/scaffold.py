@@ -1570,11 +1570,17 @@ CLANG="$WASI_SDK/bin/clang"
 WIT_BINDGEN="${{WIT_BINDGEN:-wit-bindgen}}"
 "$WIT_BINDGEN" c wit --world agent --out-dir gen
 
-# 2. One clang line: C → wasm32-wasip2 component (reactor: no main).
-mkdir -p out
-"$CLANG" --target=wasm32-wasip2 -mexec-model=reactor -O2 \\
+# 2. Compile with -O2, then link into a wasm32-wasip2 component (reactor:
+#    no main). The link step takes no -O: given one, clang runs any
+#    `wasm-opt` it finds on PATH (Homebrew's binaryen puts one there) over
+#    the linked file, and wasm-opt can't read a component.
+mkdir -p out/obj
+"$CLANG" --target=wasm32-wasip2 -O2 -c agent.c -o out/obj/agent.o
+"$CLANG" --target=wasm32-wasip2 -O2 -c wire.c -o out/obj/wire.o
+"$CLANG" --target=wasm32-wasip2 -O2 -c gen/agent.c -o out/obj/agent_bindings.o
+"$CLANG" --target=wasm32-wasip2 -mexec-model=reactor \\
   -o out/agent.wasm \\
-  agent.c wire.c gen/agent.c gen/agent_component_type.o
+  out/obj/agent.o out/obj/wire.o out/obj/agent_bindings.o gen/agent_component_type.o
 
 echo "→ out/agent.wasm (wasm component)"
 """

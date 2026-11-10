@@ -165,16 +165,14 @@ impl ValueSpec {
         self.shape.len()
     }
 
+    /// Saturates instead of wrapping; a decoded spec never saturates, since
+    /// decoding refuses a shape whose byte length doesn't fit `usize`.
     pub fn numel(&self) -> usize {
-        self.shape
-            .iter()
-            .map(|&d| d as usize)
-            .product::<usize>()
-            .max(1)
+        checked_numel(&self.shape).unwrap_or(usize::MAX)
     }
 
     pub fn byte_len(&self) -> usize {
-        self.numel() * self.dtype.size()
+        self.numel().saturating_mul(self.dtype.size())
     }
 
     pub fn slice(&self, name: &str) -> Option<&Slice> {
@@ -229,7 +227,10 @@ impl ValueSpec {
         let shape: Vec<u32> = (0..rank).map(|_| r.u32()).collect::<Result<_>>()?;
         let low = r.f32()?;
         let high = r.f32()?;
-        let numel = shape.iter().map(|&d| d as usize).product::<usize>().max(1);
+        // A shape whose byte length doesn't fit this machine's address size
+        // can never describe a real payload: refuse it, never wrap it.
+        let numel = checked_numel(&shape).ok_or(WireError)?;
+        numel.checked_mul(dtype.size()).ok_or(WireError)?;
         let elem_bounds = if r.u8()? != 0 {
             // Bounds-check before allocating: a hostile numel must not OOM.
             if numel.checked_mul(8).ok_or(WireError)? > r.remaining() {
@@ -540,4 +541,12 @@ pub fn neutral_bytes(spec: &ValueSpec) -> Vec<u8> {
             .collect(),
         Dtype::U8 => spec.neutral_f32().iter().map(|v| v.round() as u8).collect(),
     }
+}
+/// Product of a shape (rank 0 = 1, and a zero axis counts as 1, as `numel`
+/// always has), or `None` when it overflows `usize`.
+fn checked_numel(shape: &[u32]) -> Option<usize> {
+    shape
+        .iter()
+        .try_fold(1usize, |n, &d| n.checked_mul(d as usize))
+        .map(|n| n.max(1))
 }
