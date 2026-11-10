@@ -333,3 +333,15 @@ tasks:
         else
           echo "test: no C compiler on PATH — skipping the C wire reference (CI runs it)"
         fi
+
+  lint:
+    desc: "Lint the template's own code: rustfmt + clippy -D warnings on the Rust wire reference, and the C wire reference built with -Wall -Wextra -Werror (and -fsyntax-only on its test). CI runs it."
+    cmds:
+      - cargo fmt --manifest-path reference/rust-wire/Cargo.toml --check
+      - cargo clippy --manifest-path reference/rust-wire/Cargo.toml --all-targets --quiet -- -D warnings
+      - |
+        if command -v cc >/dev/null 2>&1; then
+          cc -std=c99 -Wall -Wextra -Werror -fsyntax-only reference/c-wire/wire.c reference/c-wire/test_wire.c
+        else
+          echo "lint: no C compiler on PATH — skipping the C wire reference (CI runs it)"
+        fi

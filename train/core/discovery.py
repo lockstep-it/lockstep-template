@@ -108,6 +108,9 @@ class PublishedEnvironment:
     #: Each published mode's assessment tags (``facet:value`` from the
     #: shared vocabulary, free words last), as the catalog lists them.
     tags: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    #: Published modes that are fetchable without a key AND seat two or more
+    #: agents (the release's ``roster_max``) — where self-play applies.
+    public_multiseat: tuple[str, ...] = ()
 
 
 def published() -> list[PublishedEnvironment]:
@@ -142,6 +145,11 @@ def published() -> list[PublishedEnvironment]:
                     for m in env.get("modes", [])
                     if m.get("release") is not None
                 },
+                public_multiseat=tuple(
+                    key
+                    for key, rel in releases
+                    if rel.get("engine_object_key") and int(rel.get("roster_max") or 1) >= 2
+                ),
             )
         )
     return found
@@ -161,10 +169,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print only the first PUBLIC slug (exit 1 when there is none)",
     )
+    p.add_argument(
+        "--first-multiseat",
+        action="store_true",
+        help="print `<slug> <mode>` of the first PUBLIC mode seating two or more agents "
+        "(self-play needs one; exit 1 when there is none)",
+    )
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args(argv)
 
     envs = published()
+    if args.first_multiseat:
+        for env in envs:
+            if env.public_multiseat:
+                print(f"{env.slug} {env.public_multiseat[0]}")
+                return 0
+        print("no public environment has a multi-seat mode", file=sys.stderr)
+        return 1
     if args.first:
         for env in envs:
             if env.public:

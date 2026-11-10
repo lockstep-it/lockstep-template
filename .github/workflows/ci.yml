@@ -59,6 +59,13 @@ jobs:
         # hits.
         run: python -m train.toolchain install c
 
+      - name: Lint (what `task lint` runs; CI has no Task)
+        if: runner.os == 'Linux'
+        run: |
+          cargo fmt --manifest-path reference/rust-wire/Cargo.toml --check
+          cargo clippy --manifest-path reference/rust-wire/Cargo.toml --all-targets --quiet -- -D warnings
+          cc -std=c99 -Wall -Wextra -Werror -fsyntax-only reference/c-wire/wire.c reference/c-wire/test_wire.c
+
       - name: Wire references vs the spec goldens (Rust, then C natively where cc exists)
         run: |
           cargo test --manifest-path reference/rust-wire/Cargo.toml --quiet
@@ -86,19 +93,24 @@ jobs:
       - name: Train through the full pipeline (tiny, vectorized, spawn workers)
         run: python -m train.main --agent ci-bot --steps 256 --num-envs 2
 
-      - name: Self-play (PARALLEL) through the same pipeline
-        # Only on a multi-seat engine: the discovered environment is the
-        # platform's first public one, which may have a single seat, and
-        # self-play then refuses by design.
+      - name: Self-play (PARALLEL) on the first public multi-seat mode
+        # Self-play needs two or more seats, and the first public
+        # environment above may have one, so this asks the platform for the
+        # first public mode that seats two (`--first-multiseat`) and trains
+        # its own agent there. Skipped only when the platform publishes none.
         run: |
-          ENGINE="$(find out/cache/"$ENV" -name engine.wasm | head -1)"
-          SEATS="$(python -c 'import sys; from lockstep_train.env import LockstepParallelEnv as E; print(len(E(engine_source=sys.argv[1]).possible_agents))' "$ENGINE")"
-          if [ "$SEATS" -lt 2 ]; then
-            echo "$ENV has $SEATS seat(s): self-play does not apply; skipped"
+          if ! PICK="$(python -m train.core.discovery --first-multiseat)"; then
+            echo "no public multi-seat mode on the platform: self-play skipped"
             exit 0
           fi
-          python -m train.main --agent ci-bot --steps 128 --parallel
-          test -f agents/ci-bot/out/policy.pt
+          read -r SP_ENV SP_MODE <<<"$PICK"
+          echo "self-play against: $SP_ENV [$SP_MODE]"
+          python -m train.scaffold --name ci-selfplay --env "$SP_ENV" --mode "$SP_MODE"
+          ENGINE="$(find out/cache/"$SP_ENV"/"$SP_MODE" -name engine.wasm | head -1)"
+          SEATS="$(python -c 'import sys; from lockstep_train.env import LockstepParallelEnv as E; print(len(E(engine_source=sys.argv[1]).possible_agents))' "$ENGINE")"
+          test "$SEATS" -ge 2 || { echo "$SP_ENV [$SP_MODE] lists two or more seats but its engine has $SEATS"; exit 1; }
+          python -m train.main --agent ci-selfplay --steps 128 --parallel
+          test -f agents/ci-selfplay/out/policy.pt
 
       - name: create-agent + build in Rust (component from the same declaration)
         run: |

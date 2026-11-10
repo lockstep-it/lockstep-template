@@ -25,7 +25,7 @@ from train.core.discovery import published, resolve
 TOKEN = "0123456789abcdef"
 RELEASES = {
     "two-mode": {"version": "0.7.0", "default_mode": "alpha",
-                 "modes": ["alpha", "beta"]},
+                 "modes": ["alpha", "beta"], "seats": {"beta": 2}},
     # A multi-mode release that (wrongly) omits default_mode: the resolver
     # must demand MODE= rather than guess a mode.
     "no-default": {"version": "1.0.0", "modes": ["a", "b"]},
@@ -34,7 +34,8 @@ RELEASES = {
     # Gated (every environment but a public example): published, but its
     # engine has no public CDN key — only a signed-in caller who may see it
     # (LOCKSTEP_API_KEY) can fetch it.
-    "sealed": {"version": "3.0.0", "modes": ["default"], "public": False},
+    "sealed": {"version": "3.0.0", "modes": ["default"], "public": False,
+               "seats": {"default": 4}},
     # Annotated but never published: environment/list carries it with no
     # release on any mode, so `published()` must drop it.
     "unpublished": {"version": "0.0.0", "modes": ["default"], "published": False},
@@ -52,7 +53,8 @@ def _mode_entry(slug: str, mode: str) -> dict:
         return {"key": mode, "release": None}
     key = f"{prefix(slug, mode)}/engine.wasm" if env.get("public", True) else ""
     return {"key": mode, "release": {"environment_version": env["version"],
-                                     "engine_object_key": key}}
+                                     "engine_object_key": key,
+                                     "roster_max": env.get("seats", {}).get(mode, 1)}}
 
 
 class Api(http.server.BaseHTTPRequestHandler):
@@ -201,3 +203,20 @@ def test_cli_first_fails_clearly_when_nothing_is_public(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "no publicly published environment" in captured.err
+
+
+def test_cli_first_multiseat_picks_a_public_mode_with_two_seats(capsys):
+    # two-mode's beta seats two; sealed seats four but needs a key.
+    assert discovery_main(["--first-multiseat"]) == 0
+    assert capsys.readouterr().out.strip() == "two-mode beta"
+
+
+def test_cli_first_multiseat_fails_clearly_when_none(monkeypatch, capsys):
+    from train.core import discovery
+
+    single = [e for e in published() if e.slug != "two-mode"]
+    monkeypatch.setattr(discovery, "published", lambda: single)
+    assert discovery.main(["--first-multiseat"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no public environment has a multi-seat mode" in captured.err

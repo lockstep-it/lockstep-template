@@ -105,6 +105,7 @@ it and whether the API accepts it.
 | `task report ARCHIVE=` | What the grader would show for a local match, read off its archive (default `out/archive.bin`): pass/fail, score, the headline metrics, then every metric with its label and unit. |
 | `task upload AGENT= ASSESSMENT= NAME= AGENT_ID= APPROVE=1` | Upload the agent's bundle. `ASSESSMENT=<id>` makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints the exact command) — final; `APPROVE=1` skips the confirmation prompt. Without `ASSESSMENT=` it is a plain build: a learner runs it on the suite from the Submit step, and it is never a submission (a candidate's plain upload is refused). |
 | `task test` | The template's own tests (hermetic + engine-backed + the wire references vs the spec goldens). |
+| `task lint` | Lint the template's own code: rustfmt + clippy on the Rust wire reference, the C wire reference under `-Wall -Wextra -Werror`. |
 
 ## Debugging your agent
 
