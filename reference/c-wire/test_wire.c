@@ -42,8 +42,9 @@ static uint8_t *read_file(const char *path, size_t *len) {
 }
 
 static char *fixture(const char *dir, const char *name) {
-    char *p = malloc(strlen(dir) + strlen(name) + 2);
-    sprintf(p, "%s/%s", dir, name);
+    size_t n = strlen(dir) + strlen(name) + 2;
+    char *p = malloc(n);
+    snprintf(p, n, "%s/%s", dir, name);
     return p;
 }
 
@@ -261,6 +262,37 @@ int main(int argc, char **argv) {
     wire_input_builder_push_f32(&b, action, act_vals);
     wire_input_builder_finish(&b, &enc, &enc_len);
     CHECK(enc == NULL && enc_len == 0);
+
+    /* ── hostile declarations fail cleanly, never crash or over-allocate ── */
+    {
+        /* A meta count far beyond the bytes left: refused before the array
+         * exists, and the cleanup must not walk a NULL array. */
+        uint8_t bad[] = {'L', 'S', 'T', 'I', 1, 0, 0, 0, 0, 0, 0, 0, /* seat */
+                         0, 0, 0, 0,                                  /* n_obs */
+                         0, 0, 0, 0,                                  /* n_act */
+                         0xff, 0xff, 0xff, 0x7f};                     /* n_meta */
+        wire_seat_init_t hostile;
+        CHECK(wire_seat_init_decode(bad, sizeof bad, &hostile) == WIRE_ERR);
+        CHECK(hostile.meta == NULL && hostile.n_meta == 0);
+    }
+    {
+        /* One observation whose shape overflows size_t (2^96 elements). */
+        uint8_t region[] = {1, 0, 'v', 0, 0, /* name "v", doc "" */
+                            0, 3,             /* f32, rank 3 */
+                            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                            0, 0, 0x80, 0xbf, 0, 0, 0x80, 0x3f, /* low -1, high 1 */
+                            1};                                 /* has_elem_bounds */
+        uint8_t msg[4 + 4 + 4 + 4 + 4 + sizeof region];
+        memcpy(msg, "LSTI", 4);
+        put_le_u32(msg + 4, 1);
+        put_le_u32(msg + 8, 0);
+        put_le_u32(msg + 12, 1);
+        put_le_u32(msg + 16, (uint32_t)sizeof region);
+        memcpy(msg + 20, region, sizeof region);
+        wire_seat_init_t hostile;
+        CHECK(wire_seat_init_decode(msg, sizeof msg, &hostile) == WIRE_ERR);
+        CHECK(hostile.obs == NULL && hostile.n_obs == 0);
+    }
 
     wire_view_free(&view);
     wire_seat_init_free(&init);

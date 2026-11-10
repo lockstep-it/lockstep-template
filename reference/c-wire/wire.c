@@ -5,6 +5,7 @@
 #include "wire.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -121,15 +122,23 @@ static int spec_parse_fields(reader_t *r, wire_value_spec_t *t) {
     for (uint8_t i = 0; i < rank; i++) {
         if (!read_u32(r, &t->shape[i]))
             return 0;
+        /* A shape whose element count doesn't fit size_t can never describe
+         * a real payload (on wasm32 a few large axes are enough): refuse it
+         * rather than let the product wrap. */
+        if (t->shape[i] && t->numel > SIZE_MAX / t->shape[i])
+            return 0;
         t->numel *= t->shape[i];
     }
     if (t->numel == 0)
         t->numel = 1;
+    /* Every byte length is numel × dtype size (at most 4): it must fit too. */
+    if (t->numel > SIZE_MAX / 4)
+        return 0;
     if (!read_f32(r, &t->low) || !read_f32(r, &t->high) || !read_u8(r, &has_elem_bounds))
         return 0;
     if (has_elem_bounds) {
         /* Bounds-check before allocating: a hostile numel must not OOM. */
-        if (t->numel * 8 > r->len - r->pos)
+        if (t->numel > (r->len - r->pos) / 8)
             return 0;
         t->elem_low = malloc(sizeof(float) * t->numel);
         t->elem_high = malloc(sizeof(float) * t->numel);
@@ -289,14 +298,18 @@ wire_status_t wire_seat_init_decode(const uint8_t *bytes, size_t len, wire_seat_
         goto fail;
     if (!specs_parse(&r, &out->actions, &out->n_actions))
         goto fail;
-    if (!read_u32(&r, &out->n_meta))
+    uint32_t n_meta;
+    if (!read_u32(&r, &n_meta))
         goto fail;
-    if (out->n_meta) {
-        if ((size_t)out->n_meta * 4 > r.len - r.pos)
+    if (n_meta) {
+        if ((size_t)n_meta * 4 > r.len - r.pos)
             goto fail;
-        out->meta = calloc(out->n_meta, sizeof(wire_meta_t));
+        out->meta = calloc(n_meta, sizeof(wire_meta_t));
         if (!out->meta)
             goto fail;
+        /* Only now: `fail` frees n_meta entries, so the count must never be
+         * set while the array it describes doesn't exist. */
+        out->n_meta = n_meta;
         for (uint32_t i = 0; i < out->n_meta; i++)
             if (!read_str(&r, &out->meta[i].key) || !read_str(&r, &out->meta[i].value))
                 goto fail;

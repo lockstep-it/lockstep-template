@@ -172,6 +172,11 @@ every environment emits — `score`, `success`, `ticks`, `bad-inputs`,
   product(shape)` bytes exactly. Rank 0 means one element.
 - Observations and actions appear in **declared order** with **exact byte
   lengths** in every `View` and `Input`.
+- A reader **refuses** a `ValueSpec` whose `dtype size × product(shape)`
+  doesn't fit its own address size (on wasm32, a few large axes are enough),
+  and checks every declared count against the bytes actually remaining
+  **before** allocating for it. A hostile or corrupt `SeatInit` must fail to
+  decode, never wrap a size or allocate from it.
 
 ```
 SliceSpec  : name str | doc str | unit str | start u32 | len u32
