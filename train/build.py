@@ -158,18 +158,28 @@ def compile_c_agent(agent_dir: Path) -> Path:
         check=True,
         cwd=agent_dir,
     )
-    (agent_dir / "out").mkdir(parents=True, exist_ok=True)
+    obj = agent_dir / "out" / "obj"
+    obj.mkdir(parents=True, exist_ok=True)
+    # Compile with -O2, then link with NO -O: given one at link time, clang
+    # runs any `wasm-opt` on PATH (Homebrew's binaryen puts one there) over
+    # the linked component, which wasm-opt can't read, and the build fails.
+    # (gen/agent.c and agent.c share a basename, hence the explicit names.)
+    objects = []
+    for src, name in (("agent.c", "agent.o"), ("wire.c", "wire.o"), ("gen/agent.c", "agent_bindings.o")):
+        subprocess.run(
+            [str(clang), "--target=wasm32-wasip2", "-O2", "-c", src, "-o", f"out/obj/{name}"],
+            check=True,
+            cwd=agent_dir,
+        )
+        objects.append(f"out/obj/{name}")
     subprocess.run(
         [
             str(clang),
             "--target=wasm32-wasip2",
             "-mexec-model=reactor",
-            "-O2",
             "-o",
             "out/agent.wasm",
-            "agent.c",
-            "wire.c",
-            "gen/agent.c",
+            *objects,
             "gen/agent_component_type.o",
         ],
         check=True,

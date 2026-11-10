@@ -305,6 +305,11 @@ def main() -> None:
             resume=args.resume,
             build=build,
         )
+        # The same weights file a single-seat run writes: `--from-weights`
+        # (export, a lineup) reloads it. Self-play is PPO with both seats.
+        weights = out_dir / "policy.pt"
+        save_weights(weights, net, "ppo")
+        print(f"→ weights: {weights}")
     else:
         print(f"── training {env_slug} [{mode}] for {args.steps} steps")
         net = train(

@@ -391,10 +391,13 @@ fixed by the declaration:
   infinity as open. They agree on every bound that is infinite or below
   `1e30`, so a declaration must not use a finite action bound of magnitude
   `1e30` or more. Environments check this in their tests.
-- **Shapes are exact.** An output whose element count matches but whose
-  shape does not (a transposed `[40, 64]` for a declared `[64, 40]`) is
-  refused by the shell and by `lockstep-train`'s encoder; it never becomes a
-  silently-misread action.
+- **Emit each output in its declared shape.** The shell (and
+  `lockstep-train`'s encoder) check an output's element **count**, not its
+  shape: a transposed `[40, 64]` for a declared `[64, 40]` has the right
+  count, is read row-major as the declared shape, and so becomes a
+  scrambled action rather than a refusal. Export the graph with the declared
+  shape (the template's export does); a shape check in the shell is planned
+  for its next release.
 - **It tells you what it did, locally.** A graph cannot print, so the shell
   prints for it when the agent's environment carries
   `LOCKSTEP_AGENT_LOGS=1` — which `task match LOGS=1` (the CLI's
