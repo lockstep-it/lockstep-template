@@ -1,347 +1,63 @@
-# The template's entire surface. Every task uses the repo-local .venv
-# explicitly — no shell activation, no global installs.
-#
-# The unit of work is an AGENT (`agents/<name>/`, made by `task
-# create-agent`): its agent.toml names the environment, mode and language,
-# so train/build/match/upload can never pair it with the wrong engine.
-# AGENT= may be omitted whenever exactly one agent exists. Engines are
-# fetched lazily into a keyed cache (out/cache/<env>/<mode>/) — nothing to
-# download by hand, and switching environments can never clobber another
-# agent's engine. There are no per-environment packages and no
-# per-environment config in this repo — the platform API names the release,
-# and the engine wasm's own declaration describes the whole interface.
-# No environment is named here, not even as a default: `task envs` asks the
-# platform what is published, and ENV=<slug> is always yours to pass.
-# See an assessment end to end: https://lockstep.it/companies/examples
+# The template's commands. Every task uses the repo-local .venv; nothing is
+# installed globally. FOLDER= is the folder `lockstep invite get` made.
+# Extra flags go after `--`: task train FOLDER=~/acme-card-fraud -- --minutes 10
 version: "3"
 
-# Print what the task SAYS, not the shell line that says it. This is a
-# teaching repo: `task train` should read as its own progress output, not as
-# an echo of every `"{{.PY}}" -m train...` invocation ahead of it.
 silent: true
-
-dotenv: [".env"]
 
 vars:
   VENV: "{{.ROOT_DIR}}/.venv"
   PY: "{{.VENV}}/bin/python"
-  LANGS: '{{.LANGS | default "python"}}'
+  NAME: '{{.NAME | default "my-policy"}}'
 
 tasks:
   setup:
-    desc: "Provision toolchains. LANGS=python (default) | rust | c, comma-separated: python = .venv + the training stack; rust = wasm32-wasip2 target; c = wasi-sdk + wit-bindgen (detects /opt/wasi-sdk or $WASI_SDK first, else downloads into out/toolchains/). The ONE place that installs anything."
+    desc: "Make .venv with the training stack and lockstep-train (LOCKSTEP_TRAIN_SPEC= for another pip spec, e.g. a wheel file)"
     cmds:
-      - |
-        IFS=',' read -ra langs <<< "{{.LANGS}}"
-        for lang in "${langs[@]}"; do
-          case "$lang" in
-            python)
-              python3 -m venv "{{.VENV}}"
-              "{{.VENV}}/bin/pip" install --upgrade pip
-              "{{.VENV}}/bin/pip" install -r requirements.txt
-              # The one Lockstep dependency. LOCKSTEP_TRAIN_SPEC pins a
-              # different pip spec for it (a version, or a wheel file).
-              "{{.VENV}}/bin/pip" install {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train[pettingzoo]>=0.6.0\""}}
-              ;;
-            rust|c)
-              python3 -m train.toolchain install "$lang"
-              ;;
-            *)
-              echo "setup: unknown LANGS entry '$lang' (python, rust, c)" >&2; exit 1
-              ;;
-          esac
-          echo "setup: $lang ready"
-        done
-      - 'echo "next: task envs   (pick a slug)   then: task create-agent NAME=my-bot ENV=<slug>   (add LANG=rust or LANG=c for the hand-written track)"'
-
-  envs:
-    desc: "List the environments you can create an agent for, from the platform — each mode with its assessment tags"
-    preconditions:
-      - sh: test -x "{{.PY}}"
-        msg: "no .venv yet — run: task setup"
-    cmds:
-      - '"{{.PY}}" -m train.core.discovery'
-
-  create-agent:
-    desc: "Scaffold agents/<NAME>/ from the engine's own declaration: a generated interface file (regenerable — every value, slice and column as a named constant with its doc and unit, plus typed accessors and an action builder) + a policy stub and, for python, the network (model.py) that are YOURS (never overwritten). NAME= ENV= MODE= LANG=python|rust|c FORCE=1 to re-scaffold under a changed identity."
-    preconditions:
-      - sh: test -x "{{.PY}}"
-        msg: "no .venv yet — run: task setup"
-      - sh: test -n "{{.NAME}}"
-        msg: "pass NAME=<agent-name> (and ENV=<slug>)"
-      - sh: test -n "{{.ENV}}"
-        msg: "pass ENV=<slug> — task envs lists them"
-    cmds:
-      # LANG is also the POSIX locale variable, so a value that is not one
-      # of ours and LOOKS like a locale (C.UTF-8, en_US.UTF-8, POSIX, C)
-      # means "not passed" — anything else non-empty is a real typo.
-      - |
-        LANG_IN="{{.LANG}}"
-        case "$LANG_IN" in
-          python|rust|c) LANG_ARG="--lang $LANG_IN" ;;
-          ""|C|POSIX|*.*|*_*) LANG_ARG="" ;;
-          *) echo "create-agent: LANG=$LANG_IN is not one of python | rust | c" >&2; exit 2 ;;
-        esac
-        "{{.PY}}" -m train.scaffold --name "{{.NAME}}" --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} $LANG_ARG {{if .FORCE}}--force{{end}}
-
-  info:
-    desc: "Print the environment's brief and wire layout in the terminal — goal, reward, what ends an episode, how you are scored, every value with its slices or columns and units, the tags, the budgets — from the engine you will train against. ENV= MODE= (the same page as the Interface tab)"
-    preconditions:
-      - sh: test -n "{{.ENV}}"
-        msg: "pass ENV=<slug> — task envs lists them"
-    cmds:
-      # Lazily fetches this env/mode's release into the keyed cache
-      # (out/cache/<env>/<mode>/ — the engine, the shell and any data blobs
-      # or ONNX artifacts the engine reads; no-op when current), then runs
-      # THAT engine for one reset and prints what it declares, so what you
-      # read is exactly what `task train` builds against. `--env` (the
-      # platform's record) is the no-download alternative:
-      # python -m lockstep_train.info --env <slug>.
-      - |
-        ENGINE="$("{{.PY}}" -m train.core.engine --env "{{.ENV}}" {{if .MODE}}--mode "{{.MODE}}"{{end}} {{if .VERSION}}--version "{{.VERSION}}"{{end}} --print-path)"
-        "{{.PY}}" -m lockstep_train.info --engine "$ENGINE"
-
-  doctor:
-    desc: "Check this machine for everything the template needs — Python, Task, the lockstep CLI, the venv, per-language toolchains for the agents you actually have, what the engine cache holds — and say exactly what is missing and how to fix it."
-    cmds:
-      # Deliberately runs on the SYSTEM python: the venv is one of the
-      # things it checks, so it cannot depend on it.
-      - python3 -m train.doctor
-
-  quickstart:
-    desc: "Zero decisions: setup → create-agent (python) → build → a real local match → hand you the archive to drop on assignments.lockstep.it/replay. ENV="
-    vars:
-      NAME: '{{.NAME | default "my-bot"}}'
-    preconditions:
-      - sh: test -n "{{.ENV}}"
-        msg: "pass ENV=<slug> — task envs lists them"
-    cmds:
-      - task: setup
-      - task: create-agent
-        vars: { NAME: "{{.NAME}}", ENV: "{{.ENV}}" }
-      - task: build
-        vars: { AGENT: "{{.NAME}}" }
-      - task: match
-        vars: { AGENT: "{{.NAME}}" }
-      - 'echo ""'
-      - 'echo "quickstart: done — out/archive.bin is a real {{.ENV}} match with agents/{{.NAME}} in every seat."'
-      - 'echo "Watch it:   drop out/archive.bin on https://assignments.lockstep.it/replay"'
-      - 'echo "Read it:    task info ENV={{.ENV}}    (the brief and the wire, in this terminal)"'
-      - 'echo "Make it yours: edit agents/{{.NAME}}/policy.py, then task build AGENT={{.NAME}}"'
-      - 'echo "Train it:      task train AGENT={{.NAME}}  then task match, then task upload"'
+      - python3 -m venv "{{.VENV}}"
+      - '"{{.PY}}" -m pip install --quiet --upgrade pip'
+      - '"{{.PY}}" -m pip install --quiet -r requirements.txt'
+      - '"{{.PY}}" -m pip install --quiet {{.LOCKSTEP_TRAIN_SPEC | default "\"lockstep-train>=1.0,<2\""}}'
+      - 'echo "setup: ready. Next: task train FOLDER=<your invite folder>"'
 
   train:
-    desc: "Train → ONNX → parity check → stage agents/<AGENT>/out/bundle. AGENT= (defaults to the sole agent; python agents only). RECIPE=ppo (default): STEPS=8192 NUM_ENVS=(cores-2, max 8) RESUME=1 to continue a crashed run, PARALLEL=1 trains BOTH seats at once on multi-seat environments. RECIPE=supervised: fit the truth the environment reveals (its feedback window or lagged reward, per agent.toml's [supervised]) — SEEDS=16 EPOCHS=20. The network is the agent's own model.py either way."
-    vars:
-      STEPS: '{{.STEPS | default "8192"}}'
-      RECIPE: '{{.RECIPE | default "ppo"}}'
+    desc: "Train, export to FOLDER/NAME (default my-policy), score on practice seeds, self-check. FOLDER= [NAME=] [RECIPE=ppo|supervised] [STEPS=] [MINUTES=] [-- more flags]"
+    requires:
+      vars: [FOLDER]
     preconditions:
       - sh: test -x "{{.PY}}"
-        msg: "no .venv yet — run: task setup"
+        msg: "no .venv yet: run task setup"
     cmds:
-      # env/mode/engine all come from the agent's own agent.toml via the
-      # keyed cache — a mode mismatch is impossible.
       - >-
-        "{{.PY}}" -m train.main {{if .AGENT}}--agent "{{.AGENT}}"{{end}}
-        --recipe {{.RECIPE}} --steps {{.STEPS}}
-        {{if .SEEDS}}--seeds {{.SEEDS}}{{end}}
-        {{if .EPOCHS}}--epochs {{.EPOCHS}}{{end}}
-        {{if .NUM_ENVS}}--num-envs {{.NUM_ENVS}}{{end}}
-        {{if .RESUME}}--resume{{end}}
-        {{if .PARALLEL}}--parallel{{end}}
+        "{{.PY}}" -m train.main --folder "{{.FOLDER}}" --name "{{.NAME}}"
+        {{if .RECIPE}}--recipe {{.RECIPE}}{{end}}
+        {{if .STEPS}}--steps {{.STEPS}}{{end}}
+        {{if .MINUTES}}--minutes {{.MINUTES}}{{end}}
+        {{.CLI_ARGS}}
 
-  build:
-    desc: "Build one agent into its submittable bundle (agents/<AGENT>/out/bundle). AGENT= (defaults to the sole agent). python: export YOUR policy.py (no training) with the generic ONNX shell; rust/c: compile the wasm component. Language comes from agent.toml — you never say it."
-    preconditions:
-      - sh: test -x "{{.PY}}"
-        msg: "no .venv yet — run: task setup"
+  evaluate:
+    desc: "Score FOLDER/NAME's exported model and the no-action on practice seeds 0 to SEEDS-1 (default 10)"
+    requires:
+      vars: [FOLDER]
     cmds:
-      - '"{{.PY}}" -m train.build {{if .AGENT}}--agent "{{.AGENT}}"{{end}}'
+      - '"{{.PY}}" -m train.evaluate --folder "{{.FOLDER}}" --name "{{.NAME}}" {{if .SEEDS}}--seeds {{.SEEDS}}{{end}} {{.CLI_ARGS}}'
 
-  match:
-    desc: "Run a real local match. AGENT= (defaults to the sole agent) takes every seat — or OPPONENTS=\"bot-2 bot-3\" puts your other agents in the next seats, in order. Debug: LOGS=1 prints what your agent writes to stdout/stderr, tagged with seat and tick; STEP=1 pauses after every tick (Enter / c / N / q); UNTIL=N runs to tick N, then pauses. Reruns are identical (seeded). BUNDLE=<dir|.wasm> for a bundle from anywhere; ENV=/MODE= only matter with BUNDLE="
-    # STEP=1 / UNTIL= read your answers from this terminal.
-    interactive: true
-    preconditions:
-      - sh: command -v lockstep
-        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      # Needs CLI >= 0.1.12: --agent-logs / --step / --until-tick and seeded
-      # agent randomness (0.1.11), and LOCKSTEP_AGENT_LOGS so a trained policy
-      # shows what it sees (0.1.12). An older one fails with "unexpected
-      # argument" or prints nothing for a python agent, which says nothing
-      # useful. doctor holds the one minimum version.
-      - sh: python3 -m train.doctor --check-cli
-        msg: "lockstep CLI is too old for task match (needs 0.1.12+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
-      - sh: test -z "{{.OPPONENTS}}" || test -z "{{.BUNDLE}}"
-        msg: "OPPONENTS= seats your other agents next to AGENT= — it does not combine with BUNDLE="
+  selfcheck:
+    desc: "Check FOLDER/NAME: the bundle, the ONNX shell's rules, and that the export plays what the network plays"
+    requires:
+      vars: [FOLDER]
     cmds:
-      # The bundle's own lockstep.toml picks the mode (--bundle), and the
-      # keyed cache means fetching one mode's engine can never replace
-      # another's — the old mode-mismatch footgun (an agent that can't read
-      # a single observation) is structurally impossible.
-      - |
-        set -e
-        if [ -n "{{.BUNDLE}}" ]; then
-          BUNDLE="{{.BUNDLE}}"; MATCH_ENV="{{.ENV}}"
-        else
-          eval "$("{{.PY}}" -m train.agents shellvars "{{.AGENT}}")"
-          BUNDLE="$AGENT_BUNDLE"; MATCH_ENV="$AGENT_ENV"
-        fi
-        if [ ! -f "$BUNDLE/lockstep.toml" ] && [ ! -f "$BUNDLE" ]; then
-          echo "no bundle at $BUNDLE — build it first: task build{{if .AGENT}} AGENT={{.AGENT}}{{end}}" >&2
-          exit 1
-        fi
-        ENGINE="$("{{.PY}}" -m train.core.engine --env "$MATCH_ENV" {{if .MODE}}--mode "{{.MODE}}"{{end}} --bundle "$BUNDLE" --print-path)"
-        # Seats: your agent everywhere, or seat 0 plus OPPONENTS in order
-        # (checked: same environment and mode, room on the roster, built).
-        if [ -n "{{.OPPONENTS}}" ]; then
-          SEATS="$("{{.PY}}" -m train.lineup {{if .AGENT}}--agent "{{.AGENT}}"{{end}} --opponents "{{.OPPONENTS}}")"
-        else
-          SEATS="$BUNDLE $BUNDLE"
-        fi
-        DEBUG_ARGS=""
-        {{if and .LOGS (ne .LOGS "0")}}DEBUG_ARGS="$DEBUG_ARGS --agent-logs"{{end}}
-        {{if and .STEP (ne .STEP "0")}}DEBUG_ARGS="$DEBUG_ARGS --step"{{end}}
-        {{if .UNTIL}}DEBUG_ARGS="$DEBUG_ARGS --until-tick {{.UNTIL}}"{{end}}
-        # The fixed seed makes every run of this command the same match —
-        # the engine's scenario and your agent's own randomness alike.
-        # --clamp-seats: a solo environment keeps one seat, a duel two.
-        lockstep match run --slug "$MATCH_ENV" \
-          --engine "$ENGINE" \
-          --agents $SEATS \
-          --clamp-seats \
-          --seed-hex 0703 \
-          $DEBUG_ARGS \
-          --out out/archive.bin
-        echo "✓ match archived → out/archive.bin"
-        echo ""
-        # What the grader would show for this match — pass/fail, score, the
-        # headline metrics, the rest — with the declaration beside the
-        # engine giving every number its label.
-        DECL="$(dirname "$ENGINE")/declaration.json"
-        if [ -f "$DECL" ]; then
-          lockstep archive report out/archive.bin --declaration "$DECL"
-        else
-          lockstep archive report out/archive.bin
-        fi
-        echo ""
-        echo "Watch it: drop out/archive.bin on https://assignments.lockstep.it/replay"
-        echo "Read it again any time: task report   (ARCHIVE=<path> for another archive)"
-
-  report:
-    desc: "What the grader would show for a local match: pass/fail, score, the headline metrics, then every metric with its label and unit — read straight off an archive. ARCHIVE=<path> (default out/archive.bin). Labels come from the declaration cached beside the environment's engine (task info / task match fetch it); without one the raw keys are shown."
-    vars:
-      ARCHIVE: '{{.ARCHIVE | default "out/archive.bin"}}'
-    preconditions:
-      - sh: command -v lockstep
-        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      - sh: lockstep archive report --help >/dev/null 2>&1
-        msg: "lockstep CLI is too old for task report (needs 0.1.10+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
-      - sh: test -f "{{.ARCHIVE}}"
-        msg: "no archive at {{.ARCHIVE}} — run a match first: task match"
-    cmds:
-      # The archive names its environment and mode; the declaration for
-      # that pair sits in the keyed cache when task info / match fetched it.
-      - |
-        set -e
-        DECL_ARGS=""
-        if command -v "{{.PY}}" >/dev/null 2>&1; then
-          DECL="$("{{.PY}}" -m train.core.engine --declaration-for "{{.ARCHIVE}}" 2>/dev/null || true)"
-          if [ -n "$DECL" ] && [ -f "$DECL" ]; then DECL_ARGS="--declaration $DECL"; fi
-        fi
-        lockstep archive report "{{.ARCHIVE}}" $DECL_ARGS
-
-  upload:
-    desc: "Upload an agent's bundle — plus its source as an employer-visible archive. ASSESSMENT=<id> makes it your submission to that hiring assessment (the id is on the assessment's Ship step, which prints this exact command); it is final. Without ASSESSMENT= the upload is a plain build — allowed for a learner (run it on the suite from the Submit step) and never a submission; a candidate's plain upload is refused. Needs LOCKSTEP_API_KEY in .env. AGENT= (defaults to the sole agent) NAME=<display name, default the agent name> AGENT_ID=<id> for a revision. SOURCE=0 to upload the bundle alone. APPROVE=1 to skip the CLI's confirmation prompt."
-    preconditions:
-      - sh: command -v lockstep
-        msg: "lockstep CLI not on PATH — curl -fsSL https://dl.lockstep.it/install.sh | sh"
-      # --assessment arrived in 0.1.10; an older CLI would upload without
-      # naming the assessment, which is never a submission.
-      - sh: lockstep agent upload --help 2>/dev/null | grep -q -- '--assessment'
-        msg: "lockstep CLI is too old for task upload (needs 0.1.10+) — update it: curl -fsSL https://dl.lockstep.it/install.sh | sh   (task doctor checks this too)"
-      - sh: test -n "${LOCKSTEP_API_KEY:-}"
-        msg: "LOCKSTEP_API_KEY not set — cp .env.example .env, then paste a key from the Authorization page at https://lockstep.it into LOCKSTEP_API_KEY="
-    cmds:
-      - |
-        set -e
-        eval "$("{{.PY}}" -m train.agents shellvars "{{.AGENT}}")"
-        BUNDLE="$AGENT_BUNDLE"
-        if [ ! -f "$BUNDLE/lockstep.toml" ]; then
-          echo "no bundle at $BUNDLE — build it first: task build AGENT=$AGENT_NAME" >&2
-          exit 1
-        fi
-        DISPLAY_NAME="{{.NAME}}"; [ -n "$DISPLAY_NAME" ] || DISPLAY_NAME="$AGENT_NAME"
-        # The agent's SOURCE rides along as a separate, employer-visible
-        # archive (text files under agents/<name>/, minus out/ and build
-        # dirs) — what a hiring manager reads next to your replays. Only
-        # when the installed CLI knows the flag; an older CLI uploads the
-        # bundle alone and says so. SOURCE=0 opts out.
-        SOURCE_ARGS=""
-        if [ "{{.SOURCE}}" != "0" ]; then
-          if lockstep agent upload --help 2>/dev/null | grep -q -- '--source'; then
-            SOURCE_ARGS="--source $AGENT_DIR"
-          else
-            echo "upload: this lockstep CLI predates --source; uploading the bundle without the source archive (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
-          fi
-        fi
-        # APPROVE=1 skips the CLI's confirmation prompt (--approve, CLI
-        # 0.1.9+). Same guard: only when the installed CLI knows the flag;
-        # an older CLI still prompts and says so.
-        APPROVE_ARGS=""
-        if [ -n "{{.APPROVE}}" ] && [ "{{.APPROVE}}" != "0" ]; then
-          if lockstep agent upload --help 2>/dev/null | grep -q -- '--approve'; then
-            APPROVE_ARGS="--approve"
-          else
-            echo "upload: this lockstep CLI predates --approve; it will ask for confirmation (update: curl -fsSL https://dl.lockstep.it/install.sh | sh)" >&2
-          fi
-        fi
-        # ASSESSMENT=<id>: this upload is the submission to that hiring
-        # assessment. Never inferred — an upload without it is a plain
-        # upload, whatever assessments are open.
-        ASSESSMENT_ARGS=""
-        if [ -n "{{.ASSESSMENT}}" ]; then
-          ASSESSMENT_ARGS="--assessment {{.ASSESSMENT}}"
-        fi
-        if [ -n "{{.AGENT_ID}}" ]; then
-          lockstep agent upload --bundle "$BUNDLE" --agent-id "{{.AGENT_ID}}" $ASSESSMENT_ARGS $SOURCE_ARGS $APPROVE_ARGS
-        else
-          lockstep agent upload --bundle "$BUNDLE" \
-            --display-name "$DISPLAY_NAME" --environment-id "$AGENT_ENV" $ASSESSMENT_ARGS $SOURCE_ARGS $APPROVE_ARGS
-        fi
+      - '"{{.PY}}" -m train.selfcheck --folder "{{.FOLDER}}" --name "{{.NAME}}"'
 
   test:
-    desc: "Run the template's own tests: pytest (hermetic always; engine-backed when a cached engine exists), the Rust wire reference vs the spec goldens, and — when a C compiler is present — the C wire reference vs the same goldens."
-    summary: |
-      Run the template's own tests.
-
-      pytest runs the hermetic tests always and the engine-backed ones when
-      an engine is available: any engine in the keyed cache (out/cache/ —
-      every task that needs one fills it), or LOCKSTEP_TEST_ENGINE=<path>
-      to point them at a specific engine (see tests/test_vec_env_semantics.py).
-      Then the Rust wire reference vs the spec goldens, and — when a C
-      compiler is present — the C wire reference vs the same goldens.
+    desc: "The template's tests on the committed invite folders (tests/fixtures). With LOCKSTEP_RUNTIME_DIR and a lockstep CLI they also run lockstep check."
     cmds:
-      - '"{{.VENV}}/bin/pip" install --quiet pytest'
-      - '"{{.PY}}" -m pytest tests -q'
-      - cargo test --manifest-path reference/rust-wire/Cargo.toml --quiet
-      - |
-        if command -v cc >/dev/null 2>&1; then
-          mkdir -p out
-          cc -std=c99 -Wall -Wextra -Werror -o out/test_wire reference/c-wire/test_wire.c reference/c-wire/wire.c -lm
-          ./out/test_wire reference/rust-wire/tests/fixtures
-        else
-          echo "test: no C compiler on PATH — skipping the C wire reference (CI runs it)"
-        fi
+      - '"{{.PY}}" -m pip install --quiet "pytest>=8"'
+      - '"{{.PY}}" -m pytest -q'
 
   lint:
-    desc: "Lint the template's own code: rustfmt + clippy -D warnings on the Rust wire reference, and the C wire reference built with -Wall -Wextra -Werror (and -fsyntax-only on its test). CI runs it."
+    desc: "ruff (lint and format check) on the template's code"
     cmds:
-      - cargo fmt --manifest-path reference/rust-wire/Cargo.toml --check
-      - cargo clippy --manifest-path reference/rust-wire/Cargo.toml --all-targets --quiet -- -D warnings
-      - |
-        if command -v cc >/dev/null 2>&1; then
-          cc -std=c99 -Wall -Wextra -Werror -fsyntax-only reference/c-wire/wire.c reference/c-wire/test_wire.c
-        else
-          echo "lint: no C compiler on PATH — skipping the C wire reference (CI runs it)"
-        fi
+      - '"{{.PY}}" -m pip install --quiet "ruff==0.17.5"'
+      - '"{{.PY}}" -m ruff check .'
+      - '"{{.PY}}" -m ruff format --check .'

@@ -1,0 +1,9 @@
+# What this folder is for, written by the lockstep CLI: don't edit it.
+# `lockstep invite get` (or `training get`) writes it again.
+format = 1
+invite = "inv_fixture"
+environment = "lockstep/card-fraud"
+version = "0.2.0"
+interface_version = 1
+seats_min = 1
+seats_max = 1
