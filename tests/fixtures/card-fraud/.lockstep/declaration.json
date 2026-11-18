@@ -1,0 +1,721 @@
+{
+  "format": 1,
+  "name": "card-fraud",
+  "version": "0.2.0",
+  "interface_version": 1,
+  "title": "Card fraud",
+  "summary": "Approve, decline or challenge 2,000 card payments while fraud rings change tactics.",
+  "brief": {
+    "goal": "You are a card issuer's fraud model. One card payment arrives each turn, 2,000 in all, from a few hundred cards. Approve it, decline it, or step up (challenge the cardholder), and say how sure you are. About 1-4% are fraud, run by two to four rings that change tactics once, between turns 600 and 1,400. The truth comes late: a challenge resolves the next turn, anything else when its chargeback lands 30 to 50 turns later, in `feedback` and in `history`. You have 120 challenges.",
+    "scoring": "Out of 100, over resolved decisions. **Money, 60:** the fraud you stopped, minus 15% of each good payment you declined, minus 2-6 USD per challenge; approving everything earns 0, a perfect run 60. **Restraint, 20:** 10 × the share of challenges unused, plus 10 × (1 − false-decline rate ÷ 2%). **Confidence, 10:** 10 × (1 − 4 × Brier score). **Adapting, 10:** 10 × recall after the tactic change ÷ max(recall before it, 0.3); 0 if the match ends early. Each term is floored at 0 and capped at its points.",
+    "ending": "After 2,000 payments (completed). Early, as a failure, when the approved fraud charged back passes the loss cap: 12 × the fraud in the first 500 payments, and never under 75% of the match's fraud (loss-cap). Or when you decline more than 15% of the last 200 good payments resolved (decline-storm).",
+    "reward": "Each turn: the change in score, plus 0.02 when a challenge catches fraud and minus 0.02 when an approved fraud is charged back. The extras cancel on the last turn, so the rewards add up to the score."
+  },
+  "seats": {"exact": 1},
+  "turn_rate": 20,
+  "max_turns": 2000,
+  "inputs": [
+    {
+      "name": "payment",
+      "doc": "The payment to decide this turn.",
+      "dtype": "f32",
+      "shape": [10],
+      "bounds": {"low": 0, "high": 5000},
+      "slices": [
+        {
+          "name": "amount",
+          "doc": "Its amount.",
+          "unit": "USD",
+          "count": 1,
+          "bounds": {"low": 0.5, "high": 5000}
+        },
+        {
+          "name": "category",
+          "doc": "The merchant's category.",
+          "count": 1,
+          "bounds": {"low": 0, "high": 23},
+          "codes": [
+            {"value": 0, "label": "grocery"},
+            {"value": 1, "label": "fuel"},
+            {"value": 2, "label": "restaurant"},
+            {"value": 3, "label": "fast-food"},
+            {"value": 4, "label": "clothing"},
+            {"value": 5, "label": "electronics"},
+            {"value": 6, "label": "pharmacy"},
+            {"value": 7, "label": "department-store"},
+            {"value": 8, "label": "online-retail"},
+            {"value": 9, "label": "digital-goods"},
+            {"value": 10, "label": "airline"},
+            {"value": 11, "label": "hotel"},
+            {"value": 12, "label": "car-rental"},
+            {"value": 13, "label": "transit"},
+            {"value": 14, "label": "utilities"},
+            {"value": 15, "label": "telecom"},
+            {"value": 16, "label": "subscription"},
+            {"value": 17, "label": "gaming"},
+            {"value": 18, "label": "jewelry"},
+            {"value": 19, "label": "furniture"},
+            {"value": 20, "label": "home-improvement"},
+            {"value": 21, "label": "entertainment"},
+            {"value": 22, "label": "cash-advance"},
+            {"value": 23, "label": "other"}
+          ]
+        },
+        {
+          "name": "country",
+          "doc": "Where the merchant is, relative to the card's home country.",
+          "count": 1,
+          "bounds": {"low": 0, "high": 8},
+          "codes": [
+            {"value": 0, "label": "home"},
+            {"value": 1, "label": "neighbour"},
+            {"value": 2, "label": "western-europe"},
+            {"value": 3, "label": "eastern-europe"},
+            {"value": 4, "label": "north-america"},
+            {"value": 5, "label": "latin-america"},
+            {"value": 6, "label": "asia-pacific"},
+            {"value": 7, "label": "middle-east-africa"},
+            {"value": 8, "label": "offshore"}
+          ]
+        },
+        {
+          "name": "channel",
+          "doc": "How the card was used.",
+          "count": 1,
+          "bounds": {"low": 0, "high": 3},
+          "codes": [
+            {"value": 0, "label": "card-present"},
+            {"value": 1, "label": "e-commerce"},
+            {"value": 2, "label": "recurring"},
+            {"value": 3, "label": "atm"}
+          ]
+        },
+        {
+          "name": "hour",
+          "doc": "Local hour of day.",
+          "unit": "hours",
+          "count": 1,
+          "bounds": {"low": 0, "high": 24}
+        },
+        {
+          "name": "weekend",
+          "doc": "1 on a Saturday or Sunday, else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "ip_risk",
+          "doc": "Reputation of the payment's IP address: 0 clean to 1 known bad.",
+          "unit": "risk",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "cvv_match",
+          "doc": "Card security code: 1 matched, 0 mismatched, 0.5 not checked.",
+          "unit": "match",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "avs_match",
+          "doc": "Billing address check: 1 matched, 0 mismatched, 0.5 not checked.",
+          "unit": "match",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "merchant_risk",
+          "doc": "The merchant's past chargeback rate.",
+          "unit": "ratio",
+          "count": 1,
+          "bounds": {"low": 0, "high": 0.1}
+        }
+      ]
+    },
+    {
+      "name": "card",
+      "doc": "This card's activity before this payment.",
+      "dtype": "f32",
+      "shape": [10],
+      "bounds": {"low": 0, "high": 50000},
+      "slices": [
+        {
+          "name": "since_last",
+          "doc": "Minutes since the card's previous payment; 43,200 (30 days) when it has none.",
+          "unit": "minutes",
+          "count": 1,
+          "bounds": {"low": 0, "high": 43200}
+        },
+        {
+          "name": "payments_1h",
+          "doc": "Payments on the card in the last hour, counted up to 50.",
+          "unit": "payments",
+          "count": 1,
+          "bounds": {"low": 0, "high": 50}
+        },
+        {
+          "name": "payments_24h",
+          "doc": "Payments on the card in the last 24 hours, counted up to 200.",
+          "unit": "payments",
+          "count": 1,
+          "bounds": {"low": 0, "high": 200}
+        },
+        {
+          "name": "spend_24h",
+          "doc": "Amount spent on the card in the last 24 hours, counted up to 50,000.",
+          "unit": "USD",
+          "count": 1,
+          "bounds": {"low": 0, "high": 50000}
+        },
+        {
+          "name": "amount_ratio",
+          "doc": "This payment's amount ÷ the card's mean payment over 30 days (its usual amount when it has none).",
+          "unit": "ratio",
+          "count": 1,
+          "bounds": {"low": 0, "high": 10000}
+        },
+        {
+          "name": "new_merchant",
+          "doc": "1 if the card has never paid this merchant, else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "new_country",
+          "doc": "1 if the card has never been used in this country, else 0. Always 0 at home.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "device_cards",
+          "doc": "Cards seen on this payment's device in the last 7 days. 1 is a device only this card uses; 0 a device never seen.",
+          "unit": "cards",
+          "count": 1,
+          "bounds": {"low": 0, "high": 500}
+        },
+        {
+          "name": "account_age",
+          "doc": "Days since the card was issued.",
+          "unit": "days",
+          "count": 1,
+          "bounds": {"low": 0, "high": 3650}
+        },
+        {
+          "name": "your_declines_24h",
+          "doc": "Payments on this card you declined in the last 24 hours.",
+          "unit": "payments",
+          "count": 1,
+          "bounds": {"low": 0, "high": 64}
+        }
+      ]
+    },
+    {
+      "name": "challenges_left",
+      "doc": "Challenges you have left. A step-up with none left is a decline.",
+      "dtype": "f32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 120},
+      "unit": "challenges"
+    },
+    {
+      "name": "progress",
+      "doc": "Share of the match played: 0 at the first payment, 0.9995 at the last.",
+      "dtype": "f32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 1},
+      "unit": "ratio"
+    },
+    {
+      "name": "history",
+      "doc": "This card's previous 16 payments, newest first, including those from before the match. Rows past the card's history are all zeros, with `valid` 0.",
+      "dtype": "f32",
+      "shape": [16, 8],
+      "bounds": {"low": -1, "high": 43200},
+      "columns": [
+        {"name": "amount", "doc": "Its amount.", "unit": "USD", "bounds": {"low": 0, "high": 5000}},
+        {
+          "name": "category",
+          "doc": "The merchant's category.",
+          "bounds": {"low": 0, "high": 23},
+          "codes": [
+            {"value": 0, "label": "grocery"},
+            {"value": 1, "label": "fuel"},
+            {"value": 2, "label": "restaurant"},
+            {"value": 3, "label": "fast-food"},
+            {"value": 4, "label": "clothing"},
+            {"value": 5, "label": "electronics"},
+            {"value": 6, "label": "pharmacy"},
+            {"value": 7, "label": "department-store"},
+            {"value": 8, "label": "online-retail"},
+            {"value": 9, "label": "digital-goods"},
+            {"value": 10, "label": "airline"},
+            {"value": 11, "label": "hotel"},
+            {"value": 12, "label": "car-rental"},
+            {"value": 13, "label": "transit"},
+            {"value": 14, "label": "utilities"},
+            {"value": 15, "label": "telecom"},
+            {"value": 16, "label": "subscription"},
+            {"value": 17, "label": "gaming"},
+            {"value": 18, "label": "jewelry"},
+            {"value": 19, "label": "furniture"},
+            {"value": 20, "label": "home-improvement"},
+            {"value": 21, "label": "entertainment"},
+            {"value": 22, "label": "cash-advance"},
+            {"value": 23, "label": "other"}
+          ]
+        },
+        {
+          "name": "country",
+          "doc": "Where the merchant was.",
+          "bounds": {"low": 0, "high": 8},
+          "codes": [
+            {"value": 0, "label": "home"},
+            {"value": 1, "label": "neighbour"},
+            {"value": 2, "label": "western-europe"},
+            {"value": 3, "label": "eastern-europe"},
+            {"value": 4, "label": "north-america"},
+            {"value": 5, "label": "latin-america"},
+            {"value": 6, "label": "asia-pacific"},
+            {"value": 7, "label": "middle-east-africa"},
+            {"value": 8, "label": "offshore"}
+          ]
+        },
+        {
+          "name": "channel",
+          "doc": "How the card was used.",
+          "bounds": {"low": 0, "high": 3},
+          "codes": [
+            {"value": 0, "label": "card-present"},
+            {"value": 1, "label": "e-commerce"},
+            {"value": 2, "label": "recurring"},
+            {"value": 3, "label": "atm"}
+          ]
+        },
+        {
+          "name": "since_last",
+          "doc": "Minutes between it and the card's payment before it.",
+          "unit": "minutes",
+          "bounds": {"low": 0, "high": 43200}
+        },
+        {
+          "name": "decision",
+          "doc": "What was decided. Payments from before the match show approve.",
+          "bounds": {"low": 0, "high": 2},
+          "codes": [
+            {"value": 0, "label": "approve"},
+            {"value": 1, "label": "decline"},
+            {"value": 2, "label": "step-up"}
+          ]
+        },
+        {
+          "name": "outcome",
+          "doc": "What it turned out to be, once known. Payments from before the match are good.",
+          "bounds": {"low": -1, "high": 1},
+          "codes": [
+            {"value": -1, "label": "unknown", "doc": "Not known yet."},
+            {"value": 0, "label": "good"},
+            {"value": 1, "label": "fraud"}
+          ]
+        },
+        {
+          "name": "valid",
+          "doc": "1 for a real payment, 0 for an unused row.",
+          "unit": "flag",
+          "bounds": {"low": 0, "high": 1}
+        }
+      ]
+    },
+    {
+      "name": "feedback",
+      "doc": "Truths that arrived this turn about your earlier decisions, on any card, newest decision first. At most 8 a turn; the rest wait for the next. Unused rows are all zeros, with `valid` 0.",
+      "dtype": "f32",
+      "shape": [8, 5],
+      "bounds": {"low": -1, "high": 5000},
+      "columns": [
+        {
+          "name": "age",
+          "doc": "Turns since you decided it.",
+          "unit": "turns",
+          "bounds": {"low": 0, "high": 2000}
+        },
+        {
+          "name": "decision",
+          "doc": "What you decided.",
+          "bounds": {"low": 0, "high": 2},
+          "codes": [
+            {"value": 0, "label": "approve"},
+            {"value": 1, "label": "decline"},
+            {"value": 2, "label": "step-up"}
+          ]
+        },
+        {
+          "name": "outcome",
+          "doc": "What it was: good or fraud, never unknown here.",
+          "bounds": {"low": -1, "high": 1},
+          "codes": [
+            {"value": -1, "label": "unknown", "doc": "Not known yet."},
+            {"value": 0, "label": "good"},
+            {"value": 1, "label": "fraud"}
+          ]
+        },
+        {"name": "amount", "doc": "Its amount.", "unit": "USD", "bounds": {"low": 0, "high": 5000}},
+        {
+          "name": "valid",
+          "doc": "1 for a real row, 0 for an unused one.",
+          "unit": "flag",
+          "bounds": {"low": 0, "high": 1}
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "decision",
+      "doc": "What to do with this turn's payment.",
+      "dtype": "i32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 2},
+      "codes": [
+        {
+          "value": 0,
+          "label": "approve",
+          "doc": "Let it through. A fraud costs its full amount when its chargeback lands."
+        },
+        {
+          "value": 1,
+          "label": "decline",
+          "doc": "Refuse it. A good payment declined costs 15% of its amount."
+        },
+        {
+          "value": 2,
+          "label": "step-up",
+          "doc": "Challenge the cardholder: stops fraud, resolves next turn, uses one challenge and costs 2-6 USD. With none left, a decline."
+        }
+      ]
+    },
+    {
+      "name": "confidence",
+      "doc": "How likely your decision is right (a decline or step-up is right on fraud, an approve on a good payment). Scored by Brier score.",
+      "dtype": "f32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 1},
+      "unit": "probability"
+    }
+  ],
+  "no_action": "Approve, with confidence 0.5: the bank's stand-in rule when its model is silent. No payment is declined unseen and no challenge is spent.",
+  "budgets": {"turn_fuel": 1000000, "init_fuel": 8000000, "setup_fuel": 180000000, "step_fuel": 250000},
+  "stats": [
+    {
+      "key": "score",
+      "label": "Score",
+      "doc": "The four terms in Scoring, added.",
+      "unit": "pts",
+      "kind": "measure",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "net-pnl",
+      "label": "Net money",
+      "doc": "Fraud stopped, minus 15% of the good payments declined, minus challenge costs.",
+      "unit": "USD",
+      "kind": "money",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "fraud-loss",
+      "label": "Fraud loss",
+      "doc": "Approved fraud, charged back.",
+      "unit": "USD",
+      "kind": "money",
+      "better": "lower",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "recall",
+      "label": "Recall",
+      "doc": "Share of the fraud you declined or challenged.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "false-decline-rate",
+      "label": "False declines",
+      "doc": "Share of the good payments you declined.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "lower",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "brier",
+      "label": "Brier score",
+      "doc": "Mean squared error of your confidence against whether the decision was right. 0.25 is a coin.",
+      "unit": "squared error",
+      "kind": "measure",
+      "better": "lower",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "recall-before-drift",
+      "label": "Recall before the change",
+      "doc": "Recall on the fraud from before the rings changed tactics.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "recall-after-drift",
+      "label": "Recall after the change",
+      "doc": "Recall on the fraud from after the rings changed tactics.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    }
+  ],
+  "endings": [
+    {
+      "key": "completed",
+      "label": "All payments decided",
+      "doc": "2,000 payments decided.",
+      "outcome": "success"
+    },
+    {
+      "key": "loss-cap",
+      "label": "Loss cap passed",
+      "doc": "Approved fraud charged back passed the loss cap.",
+      "outcome": "failure"
+    },
+    {
+      "key": "decline-storm",
+      "label": "Decline storm",
+      "doc": "More than 15% of the last 200 good payments resolved were declined.",
+      "outcome": "failure"
+    }
+  ],
+  "facts": [
+    {
+      "key": "fraud-rate",
+      "label": "Fraud rate",
+      "doc": "The seed's base share of fraud.",
+      "unit": "ratio"
+    },
+    {"key": "rings", "label": "Rings", "doc": "Fraud rings in the match.", "unit": "rings"},
+    {
+      "key": "ring-kinds",
+      "label": "Ring kinds",
+      "doc": "Which kinds of ring ran, as bits added: 1 card testing, 2 account takeover, 4 bust-out, 8 friendly fraud.",
+      "unit": "bitmask"
+    },
+    {
+      "key": "drift-turn",
+      "label": "Tactic change",
+      "doc": "The first payment, by turn, made with the new tactics.",
+      "unit": "turns"
+    },
+    {
+      "key": "drift-tactic",
+      "label": "New tactic",
+      "doc": "What the rings changed.",
+      "codes": [
+        {"value": 1, "label": "amounts under threshold", "doc": "Ring amounts kept under 40 USD."},
+        {
+          "value": 2,
+          "label": "channel change",
+          "doc": "Online fraud moved to terminals and standing orders, and the reverse."
+        },
+        {
+          "value": 3,
+          "label": "new device per transaction",
+          "doc": "Card testing and takeovers use a fresh device every time."
+        },
+        {
+          "value": 4,
+          "label": "geography shift",
+          "doc": "Fraud moved into the card's home country, from cleaner IPs."
+        }
+      ]
+    },
+    {
+      "key": "challenge-cost",
+      "label": "Challenge cost",
+      "doc": "The friction cost of one challenge.",
+      "unit": "USD"
+    }
+  ],
+  "series": [
+    {
+      "key": "net-pnl",
+      "label": "Net money",
+      "doc": "Net money so far, over resolved decisions.",
+      "unit": "USD",
+      "scope": "per_seat"
+    },
+    {
+      "key": "fraud-loss",
+      "label": "Fraud loss",
+      "doc": "Approved fraud charged back so far.",
+      "unit": "USD",
+      "scope": "per_seat"
+    },
+    {
+      "key": "false-decline-loss",
+      "label": "False-decline loss",
+      "doc": "15% of the good payments declined so far.",
+      "unit": "USD",
+      "scope": "per_seat"
+    },
+    {
+      "key": "challenges-left",
+      "label": "Challenges left",
+      "doc": "Challenges not yet spent.",
+      "unit": "challenges",
+      "scope": "per_seat",
+      "range": {"low": 0, "high": 120}
+    },
+    {
+      "key": "rolling-precision",
+      "label": "Precision, last 100",
+      "doc": "Over the last 100 resolved decisions, the share of your declines and challenges that were fraud. No sample until there is one.",
+      "unit": "ratio",
+      "scope": "per_seat",
+      "range": {"low": 0, "high": 1}
+    },
+    {
+      "key": "rolling-recall",
+      "label": "Recall, last 100",
+      "doc": "Over the last 100 resolved decisions, the share of fraud you declined or challenged. No sample until there is one.",
+      "unit": "ratio",
+      "scope": "per_seat",
+      "range": {"low": 0, "high": 1}
+    }
+  ],
+  "events": [
+    {"key": "ring-began", "label": "Ring began", "doc": "A fraud ring made its first payment."},
+    {"key": "drift", "label": "Tactics changed", "doc": "The rings changed tactics."},
+    {"key": "chargeback", "label": "Chargeback", "doc": "An approved fraud was charged back."},
+    {
+      "key": "caught-by-challenge",
+      "label": "Challenge caught fraud",
+      "doc": "A challenge stopped a fraud."
+    },
+    {"key": "challenges-used-up", "label": "Challenges used up", "doc": "The last challenge was spent."}
+  ],
+  "replay": {
+    "table": {
+      "columns": [
+        {"name": "card", "label": "Card", "unit": "card", "kind": "integer"},
+        {"name": "amount", "label": "Amount", "unit": "USD", "kind": "money"},
+        {
+          "name": "category",
+          "label": "Category",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "grocery"},
+            {"value": 1, "label": "fuel"},
+            {"value": 2, "label": "restaurant"},
+            {"value": 3, "label": "fast-food"},
+            {"value": 4, "label": "clothing"},
+            {"value": 5, "label": "electronics"},
+            {"value": 6, "label": "pharmacy"},
+            {"value": 7, "label": "department-store"},
+            {"value": 8, "label": "online-retail"},
+            {"value": 9, "label": "digital-goods"},
+            {"value": 10, "label": "airline"},
+            {"value": 11, "label": "hotel"},
+            {"value": 12, "label": "car-rental"},
+            {"value": 13, "label": "transit"},
+            {"value": 14, "label": "utilities"},
+            {"value": 15, "label": "telecom"},
+            {"value": 16, "label": "subscription"},
+            {"value": 17, "label": "gaming"},
+            {"value": 18, "label": "jewelry"},
+            {"value": 19, "label": "furniture"},
+            {"value": 20, "label": "home-improvement"},
+            {"value": 21, "label": "entertainment"},
+            {"value": 22, "label": "cash-advance"},
+            {"value": 23, "label": "other"}
+          ]
+        },
+        {
+          "name": "country",
+          "label": "Country",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "home"},
+            {"value": 1, "label": "neighbour"},
+            {"value": 2, "label": "western-europe"},
+            {"value": 3, "label": "eastern-europe"},
+            {"value": 4, "label": "north-america"},
+            {"value": 5, "label": "latin-america"},
+            {"value": 6, "label": "asia-pacific"},
+            {"value": 7, "label": "middle-east-africa"},
+            {"value": 8, "label": "offshore"}
+          ]
+        },
+        {
+          "name": "channel",
+          "label": "Channel",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "card-present"},
+            {"value": 1, "label": "e-commerce"},
+            {"value": 2, "label": "recurring"},
+            {"value": 3, "label": "atm"}
+          ]
+        },
+        {
+          "name": "decision",
+          "label": "Decision",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "approve"},
+            {"value": 1, "label": "decline"},
+            {"value": 2, "label": "step-up"}
+          ]
+        },
+        {"name": "confidence", "label": "Confidence", "unit": "probability", "kind": "number"},
+        {
+          "name": "truth",
+          "label": "Truth",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "good"},
+            {"value": 1, "label": "fraud"}
+          ]
+        },
+        {"name": "cost", "label": "Cost", "unit": "USD", "kind": "money"}
+      ],
+      "confusion": {"truth": "truth", "verdict": "decision"}
+    }
+  },
+  "tags": [
+    "domain:finance",
+    "skill:classification",
+    "skill:cost-sensitive-decisions",
+    "skill:online-adaptation",
+    "skill:calibration",
+    "modality:tabular",
+    "modality:event-stream",
+    "role:fraud-analyst",
+    "role:data-scientist",
+    "role:ml-engineer",
+    "method:supervised-friendly",
+    "level:entry",
+    "data:procedural",
+    "adversary:static",
+    "budget:step-ups"
+  ]
+}

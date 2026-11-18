@@ -1,0 +1,16 @@
+Invite folders as `lockstep invite get` lays them out, without a server:
+invite.toml, runtime.lock, .lockstep/engine.wasm, .lockstep/declaration.json
+and the practice files (.lockstep/data/practice/). The tests copy one into a
+temporary folder and train, export and check there.
+
+card-fraud     a decision stream: a coded output (3 codes) and an f32 output, a feedback window
+jetpack-joust  two seats (the other plays at random): an f32 output [4] and a u8 output (2 codes)
+ticket-desk    coded outputs (8 and 2 codes), an i32 input, a practice file
+
+Engines and declarations: LOCKSTEP-ENVIRONMENTS packages/catalog/<name>/build/engine.wasm
+and declaration.json at commit 4864e52 (runtime 1, interface_version 1). Rebuild
+them there and copy them here when an environment's declaration changes.
+
+panda-pick (MuJoCo, continuous outputs) is too large to commit (its robot model
+is 33 MB); tests/conftest.py lays it out from a sibling LOCKSTEP-ENVIRONMENTS
+checkout when there is one and LOCKSTEP_RUNTIME_DIR holds the physics builds.

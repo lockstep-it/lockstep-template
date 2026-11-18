@@ -1,642 +1,311 @@
-# Tutorial: from a clean machine to a submission
+# Tutorial: from your invite to a submitted trained policy
 
-This walks the whole path with real captured output: what the environment
-is, an agent scaffolded from the engine's own declaration, a hand-written
-policy through the full pipeline, then a trained one. go1-beacon (a
-quadruped walking to a beacon) is the worked example because its brief is
-short; every other slug is the same commands.
+A company has invited you to a Lockstep assessment. You can answer it with
+a program you write yourself (`lockstep agent new` makes a starter in Rust,
+C or Python), or with a **trained policy**: a neural network you train on
+your own machine and send as one ONNX file. This tutorial is the second
+way. It takes about 15 minutes the first time, most of it installing.
+
+The times below were measured on a 2021 MacBook Pro (M1 Max) while it was
+busy with other work; yours may be faster.
+
+| Step | What you do | How long |
+|---|---|---|
+| 1 | Get your invite's folder | under a minute |
+| 2 | Read what the environment asks of you | 5 to 10 minutes |
+| 3 | Set up this repo | a few minutes (PyTorch is a large download) |
+| 4 | Train, export and check, in one command | seconds to minutes: you choose |
+| 5 | Read the scores | a minute |
+| 6 | Check it as Lockstep will | seconds |
+| 7 | Watch a match | a minute |
+| 8 | Make it better | as long as you like |
+| 9 | Submit | a minute, then Lockstep runs it (up to an hour) |
+
+The examples use card-fraud, a fraud-detection assessment. Every command
+works the same for any environment.
+
+## 1. Get your invite's folder
+
+Install the `lockstep` CLI (see [lockstep.it](https://lockstep.it)), then
+use the invite id from your invite's page:
+
+```sh
+lockstep invite get inv_…
+```
+
+This makes a folder named after the environment, for example
+`acme-card-fraud/`:
+
+```
+invite.toml          which invite and environment this folder is for
+runtime.lock         the version of Lockstep's runtime your policy will run on
+environment.txt      what the environment is: the goal, the scoring, every input and output
+environment.html     the same, for a browser
+.lockstep/           the environment's engine and practice data (don't edit)
+```
+
+Everything you need to train is in that folder. Nothing private is in it:
+the practice data is for you, and Lockstep scores your submission on
+other, private scenarios of the same kind.
+
+## 2. Read what the environment asks of you
+
+Open `environment.html` (or `environment.txt`). Four things matter for
+training:
+
+- **The goal and the scoring**: what a good match looks like, out of 100.
+- **The inputs**: what your policy sees each turn. Each has a name, a
+  shape and units.
+- **The outputs**: what your policy decides each turn. A number output
+  (f32) has a low and a high bound; a coded output (i32 or u8) is one of a
+  few codes, such as approve, decline or step-up.
+- **The reward**: a number the engine gives you each turn for training.
+  For card-fraud the rewards of a match add up to its score.
+
+Also note the **no-action**: what happens on a turn your policy sends
+nothing. For card-fraud it is "approve, with confidence 0.5", which scores
+about 20. A trained policy should beat that.
+
+## 3. Set up this repo
+
+You need Python 3.11 or later. Clone this repo next to your invite's
+folder and install:
 
 ```sh
 git clone https://github.com/lockstep-it/lockstep-template
 cd lockstep-template
-task doctor
-```
-
-```
-lockstep template doctor
-running checks… (the venv check imports the training stack; give it a moment)
-
-  ✓ Python            3.14.6 at /opt/homebrew/opt/python@3.14/bin/python3.14
-  ✓ Task              3.53.1 at /opt/homebrew/bin/task
-  ✓ lockstep CLI      lockstep 0.1.4 at ~/.cargo/bin/lockstep
-  ✗ venv              no .venv/ yet
-    fix → task setup   (creates .venv and installs the training stack)
-  ✓ LOCKSTEP_API_KEY  set, verified (signs in `task upload` and engine downloads)
-  · Rust toolchain    not installed — only needed for LANG=rust agents
-    fix → task setup LANGS=rust   (or https://rustup.rs then: rustup target add wasm32-wasip2)
-  · C toolchain       wasi-sdk + wit-bindgen missing — only needed for LANG=c agents
-    fix → task setup LANGS=c   (detects /opt/wasi-sdk or $WASI_SDK, else downloads wasi-sdk into out/toolchains/)
-  · engine cache      no cached engines yet — every task that needs one (info / train / build / match) fetches it on demand
-
-1 required item(s) missing — fix the ✗ lines above, then run `task doctor` again.
-```
-
-Every ✗ comes with its fix. The · lines are optional and say what they
-unlock — the Rust/C toolchains become REQUIRED (✗) exactly when an agent in
-that language exists under `agents/`.
-
-## Contents
-
-- [Zero decisions: `task quickstart`](#zero-decisions-task-quickstart)
-- [Part 0 — read the environment](#part-0--read-the-environment)
-- [Part 1 — create an agent](#part-1--create-an-agent)
-- [Part 2 — a hand-written policy (no training)](#part-2--a-hand-written-policy-no-training)
-- [Part 3 — a trained agent](#part-3--a-trained-agent)
-- [Data environments: the supervised recipe](#data-environments-the-supervised-recipe)
-- [Part 4 — reading a match](#part-4--reading-a-match)
-- [Debugging: logs, stepping, reruns](#debugging-logs-stepping-reruns)
-- [Part 5 — submit](#part-5--submit)
-- [The advanced track: Rust and C](#the-advanced-track-rust-and-c)
-- [Two seats learning at once](#two-seats-learning-at-once)
-- [Where to go from here](#where-to-go-from-here)
-
-## Zero decisions: `task quickstart`
-
-```sh
-task quickstart ENV=go1-beacon
-```
-
-runs `setup` → `create-agent` → `build` → `match` back to back and ends with:
-
-```
-quickstart: done — out/archive.bin is a real go1-beacon match with agents/my-bot in every seat.
-Watch it:   drop out/archive.bin on https://assignments.lockstep.it/replay
-Read it:    task info ENV=go1-beacon    (the brief and the wire, in this terminal)
-Make it yours: edit agents/my-bot/policy.py, then task build AGENT=my-bot
-Train it:      task train AGENT=my-bot  then task match, then task upload
-```
-
-The rest of this tutorial is those same steps, one at a time, with what
-each one prints.
-
-## Part 0 — read the environment
-
-The engine describes itself — nothing below was typed into the template:
-
-```sh
 task setup
-task info ENV=go1-beacon
 ```
 
-```
-go1-beacon · default  (out/cache/go1-beacon/default/engine.wasm)
-================================================================
-  v0.2.0 · payload schema 2 · seat 0
+`task setup` makes `.venv/` here with PyTorch, ONNX, ONNX Runtime and
+`lockstep-train`, Lockstep's package that runs the environment's real
+engine in Python. No GPU is needed.
 
-THE BRIEF
-  GOAL
-    You drive a Unitree Go1 quadruped on flat ground. A beacon sits 2–4 m away
-    at any heading; walk to it and stay within 0.35 m of it for half a second
-    without falling. Harder seeds shove the trunk sideways one to three times
-    mid-episode.
-  REWARD
-    The episode score is 0–100: progress toward the beacon (40, best fraction
-    of the starting distance closed), reaching it (30), time to spare after
-    reaching (15), staying upright (15, mean uprightness), minus energy (up to
-    −10, mean actuator power) and jerk (up to −5, mean change in your
-    targets). Each tick's reward is that tick's change in score plus
-    potential-based shaping on distance to the beacon, so rewards sum to the
-    score.
-  ENDS
-    The episode ends the moment the robot falls (trunk below 0.15 m or
-    roll/pitch past 1 rad — counted as a failure), when it has held the beacon
-    for 0.5 s, or after 20 s (1000 ticks at 50 Hz).
-
-WHAT YOU SEE EACH TICK
-  obs  f32[54]  unbounded
-      Everything the policy sees this tick: trunk pose and rates, the 12
-      joints, the previous targets, where the beacon is from the trunk, and
-      how much time is left. Directions marked trunk frame are rotated into
-      the robot's own frame so a yawed robot sees the same world.
-          0–3  trunk_quat    [4] · unit quaternion wxyz, world frame
-                            trunk orientation
-          4–6  trunk_angvel  [3] · rad/s, trunk frame
-                            trunk angular velocity
-          7–9  trunk_linvel  [3] · m/s, trunk frame
-                            trunk linear velocity
-        10–21  joint_pos     [12] · rad
-                            joint angles, leg order FR FL RR RL × (hip
-                            abduction, thigh, calf)
-        22–33  joint_vel     [12] · rad/s
-                            joint angular velocities, same order as joint_pos
-        34–45  last_action   [12] · rad
-                            the targets you sent last tick, so a policy can
-                            penalize its own jerk
-        46–48  beacon_body   [3] · m, trunk frame
-                            beacon position minus trunk position, rotated into
-                            the trunk frame
-           49  beacon_dist   [1] · m
-                            straight-line horizontal distance to the beacon
-           50  time_left     [1]
-                            fraction of the 20 s episode remaining, 1 at the
-                            start, 0 at the end
-        51–53  gravity_body  [3] · unit vector, trunk frame
-                            world down (0,0,-1) rotated into the trunk frame —
-                            the tilt an IMU reads
-
-WHAT YOU SEND BACK
-  action  f32[12]  -4.501 .. 4.501
-      Joint position targets for the 12 actuators; the model's position
-      controller tracks them. Per-element bounds are each joint's ctrlrange.
-      Sending HOME_POSE (hip 0, thigh 0.9, calf -1.8 on every leg) stands
-      still.
-          0–2  fr  [3] · rad · -0.863..0.863, -0.686..4.501, -2.818..-0.888
-                  front-right leg: hip abduction, thigh, calf targets
-          3–5  fl  [3] · rad · -0.863..0.863, -0.686..4.501, -2.818..-0.888
-                  front-left leg: hip abduction, thigh, calf targets
-          6–8  rr  [3] · rad · -0.863..0.863, -0.686..4.501, -2.818..-0.888
-                  rear-right leg: hip abduction, thigh, calf targets
-         9–11  rl  [3] · rad · -0.863..0.863, -0.686..4.501, -2.818..-0.888
-                  rear-left leg: hip abduction, thigh, calf targets
-  Rules the world applies to your input:
-    Out-of-range values are clamped into bounds. A missing, malformed or non-
-    finite input plays the NEUTRAL action — the midpoint of each element's
-    bounds, or 0 when a bound is open — and counts as a missed tick.
-    neutral: action → per-element bounds midpoint
-    ONNX policies: the shell reads each action output in [-1, 1] and maps it
-    affinely onto the bounds above (per element where they differ; an open
-    bound passes through unscaled) — a tanh head is the right shape.
-
-BUDGETS
-  control rate   50 Hz — one decision every 20.0 ms of sim time
-  time per tick  20 ms of wall clock for your policy to answer
-  missed ticks   50 allowed before the seat forfeits
-  episode        1 tick (under a second) to 1,000 ticks (20 s)
-  players        1
-```
-
-That is the whole contract: 54 floats in, 12 joint targets out, and the
-reward you will train on spelled out by the engine that computes it. An
-environment with table-shaped values — a history window, a feedback
-window of resolved decisions — prints each column of the last axis the
-same way, with its unit and meaning (and a column whose unit is `code`
-carries its code table right there); a `HOW YOU ARE SCORED` block names
-every metric the report will show, and a `TAGS` line the mode's
-assessment tags. The
-same declaration renders as the Interface step of your assessment
-workspace on [assignments.lockstep.it](https://assignments.lockstep.it);
-`python -m lockstep_train.info --env go1-beacon` prints it without
-downloading anything. The first `task info` also fetched the release into
-the keyed cache (`out/cache/go1-beacon/default/`) — nothing else will ever
-download it again until the release changes.
-
-Multi-mode environments take `MODE=` — separate environments with separate
-engines; `task envs` lists each environment's modes and `task info
-ENV=<slug>` describes them. The cache keys on (environment, mode), so
-nothing ever clobbers anything.
-
-## Part 1 — create an agent
+Without [Task](https://taskfile.dev):
 
 ```sh
-task create-agent NAME=walker ENV=go1-beacon
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt "lockstep-train>=1.0,<2"
 ```
 
-```
-→ agents/walker/interface.py  (generated)
-→ agents/walker/policy.py  (yours — edit it)
-→ agents/walker/model.py  (yours — edit it)
-→ agents/walker/agent.toml  (generated)
+(On Windows, `.venv\Scripts\pip`.) Then use `.venv/bin/python -m train.main
+…` wherever this tutorial says `task train …`.
 
-create-agent: walker ready — go1-beacon [default] in python.
-next: edit agents/walker/  then  task train AGENT=walker
-```
-
-Everything `task info` printed is now CODE in your agent —
-`agents/walker/interface.py` opens with the brief, the metrics, the
-budgets and the neutral-action rule as its docstring, then names every
-value, slice and column:
-
-```python
-# ── obs ── f32[54] — 54 element(s), bounds [-inf, inf] every element
-# Everything the policy sees this tick: trunk pose and rates, the 12
-# joints, the previous targets, where the beacon is from the trunk, and
-# how much time is left. …
-OBS_OBS = "obs"
-OBS_OBS_INDEX = 0
-OBS_OBS_SHAPE = (54,)
-# trunk orientation [unit quaternion wxyz, world frame]
-OBS_OBS_TRUNK_QUAT = slice(0, 4)
-# joint angles, leg order FR FL RR RL × (hip abduction, thigh, calf) [rad]
-OBS_OBS_JOINT_POS = slice(10, 22)
-# beacon position minus trunk position, rotated into the trunk frame [m, trunk frame]
-OBS_OBS_BEACON_BODY = slice(46, 49)
-…
-ACT_ACTION_SHAPE = (12,)
-# front-right leg: hip abduction, thigh, calf targets [rad] — per-element bounds [-2.818..4.501], varying
-ACT_ACTION_FR = slice(0, 3)
-```
-
-A table-shaped value gets `OBS_<VALUE>_ROWS`, `OBS_<VALUE>_COLS` and one
-`OBS_<VALUE>_COL_<NAME>` constant per column, each with its doc and unit.
-Below the constants come the typed accessors: `Obs(obs).obs_joint_pos`
-is the joint-angle slice as a numpy array, `Obs(obs).<value>_<column>`
-a column of every row, and `action(fr=[0, 0.9, -1.8], ...)` builds one
-action in declared units (`normalized(...)` the same action in the
-graph's `[-1, 1]` output convention). The scaffolded `policy.py` reads
-one observation that way and answers the neutral action.
-
-The third file, `model.py`, is the network `task train` builds: one
-named stream per declared observation, with its shape in a comment, and
-the starter stream (flatten → LayerNorm → Linear → ReLU) for every value
-whatever its dtype or rank. Replace one line to change a stream — an
-image-shaped `u8` value comes with a commented-out convolution.
-
-You never transcribe an index range from a web page again — and after a
-release bump, re-running `task create-agent NAME=walker ENV=go1-beacon`
-refreshes `interface.py` and `agent.toml` while **never touching**
-`policy.py` or `model.py`. `agent.toml` is the agent's identity —
-environment, mode, language, the release it was generated from — and
-every later command reads it, which is why none of them need `ENV=`.
-
-## Part 2 — a hand-written policy (no training)
-
-`agents/walker/policy.py` is YOURS. As scaffolded it plays the neutral
-action (every output 0 → each action element's bounds midpoint), and its
-docstring shows how to read any slice by name. Build and run it as-is
-first:
+## 4. Train, export and check, in one command
 
 ```sh
-task build AGENT=walker
+task train FOLDER=../acme-card-fraud
 ```
 
-```
-→ onnx: agents/walker/out/policy.onnx (573 bytes)
-✓ torch/onnxruntime parity: max abs diff 0.000e+00
-→ bundle: agents/walker/out/bundle
+That does five things and tells you about each:
 
-Run it:               task match AGENT=walker
-Debug it:             task match AGENT=walker LOGS=1 STEP=1
-Submit final bundle:  task upload AGENT=walker
-```
+1. **Trains** with PPO for 100,000 turns, running 8 matches at once. Each
+   turn is a turn of a real match: the same engine, rules and fuel
+   Lockstep uses.
+2. **Exports** the network to `../acme-card-fraud/my-policy/`:
+   `lockstep.toml` and `models/policy.onnx`. That folder is what you
+   submit.
+3. **Scores** the exported model on practice seeds 0 to 9, which training
+   never used, next to the no-action.
+4. **Self-checks** the export: the bundle is right for your invite, the
+   model's inputs and outputs are what Lockstep's ONNX shell reads, it uses
+   only the operators Lockstep allows, and it chooses exactly what the
+   trained network chooses.
+5. Prints the next commands.
 
-(torch's ONNX exporter prints a few opset warnings above these lines; they
-are noise.) `task build` exported your `policy.py` to ONNX, proved
-torch/onnxruntime parity, and staged the submittable bundle — no training
-anywhere.
+PPO's 100,000 turns took 20 to 45 seconds on card-fraud. `MINUTES=10`
+trains for ten minutes instead; `STEPS=1000000` for a million turns.
+Training writes a checkpoint after every update, so you can stop it with
+Ctrl-C and continue later with `task train FOLDER=… -- --resume`.
+
+### Two recipes
+
+- **PPO** (the default) learns from the reward, by trial and error. It
+  suits control tasks (robots, games) where the reward comes often.
+- **Supervised** (`RECIPE=supervised`) suits data tasks where the
+  environment later tells you what was true (card-fraud's `feedback`
+  input: whether each payment was fraud). It plays 16 practice matches,
+  collects every `(what you saw, what was true)` pair, and trains the
+  first coded output to predict the truth.
+
+For card-fraud, **use the supervised recipe**:
 
 ```sh
-task match AGENT=walker
+task train FOLDER=../acme-card-fraud RECIPE=supervised
 ```
 
-```
-match finished: 13 frames, final tick 12, rankings [0], winner None — archive out/archive.bin (6437 bytes)
-        metrics: [ score 4.87, success 0, reached 0, max-tilt 0.196, energy 349, pushes 2, … ]
-✓ match archived → out/archive.bin
-Watch it: drop out/archive.bin on https://assignments.lockstep.it/replay
-```
+It trains in about 5 seconds (under 20 with the export, the scoring and
+the checks) and scored **56.6** on practice seeds 0 to 9, against **20.0** for the no-action. PPO
+from scratch did worse than the no-action after a minute (11.8): its first
+policy declines payments at random, the match ends early in a "decline
+storm", and the score gives it almost nothing to follow out of there. That
+is normal for some environments: the brief's tags (`method:…`) hint at
+what works.
 
-(Condensed — the CLI prints every metric as a struct.) Thirteen frames:
-the neutral action is each joint's range **midpoint**, which is not a
-standing pose, so the Go1 folds and the brief's ENDS rule fires at tick 12
-— "the moment the robot falls". Score 4.87 out of 100, all of it stability
-points earned before the fall. That is the real engine scoring a real
-policy; it is just a bad one.
+What one minute of PPO did on three environments (the mean score on
+practice seeds 0 to 9, the exported model against the no-action):
 
-Now make it yours: the action doc in Part 0 says the pose that stands is
-hip 0, thigh 0.9, calf −1.8. Edit `forward` in `agents/walker/policy.py`
-to emit that pose (remember the shell maps `[-1, 1]` onto each joint's
-bounds — `interface.py` has them), `task build AGENT=walker` again, and
-watch the match run to the 1000-tick time-out instead.
+| | turns trained | policy | no-action |
+|---|---|---|---|
+| card-fraud | 140,000 | 11.8 | 20.0 |
+| ticket-desk | 744,000 | 24.4 | 24.8 |
+| jetpack-joust (against a random opponent) | 628,000 | 50.0 | 50.0 |
 
-## Part 3 — a trained agent
+So the PPO here is a working start, not a finished answer: it learns
+slowly, and the work of the assessment is making it learn what matters
+(step 8).
 
-```sh
-task train AGENT=walker STEPS=64 NUM_ENVS=1     # tiny — proves the pipeline in ~a minute
-```
+## 5. Read the scores
 
-```
-── network: agents/walker/model.py (build_policy)
-── training go1-beacon [default] for 64 steps
-  update device: mps   envs: 1 (SyncVectorEnv)
-      128/64 steps  episodes=3    mean_return=   -0.86     0.4s
-→ weights: agents/walker/out/policy.pt
-→ onnx: agents/walker/out/policy.onnx (174546 bytes)
-✓ torch/onnxruntime parity: max abs diff 7.451e-08
-→ bundle: agents/walker/out/bundle
-
-Run it:               task match AGENT=walker
-Debug it:             task match AGENT=walker LOGS=1 STEP=1
-Submit final bundle:  task upload AGENT=walker
-```
-
-The network is the one in `agents/walker/model.py`, scaffolded from the
-declaration in Part 0: a flatten → LayerNorm → Linear stream for `obs`,
-then the template's trunk and a 12-wide tanh head — and that tanh head is
-not a style choice: the ONNX shell reads outputs in `[-1, 1]` and maps
-each one onto its joint's declared range. The parity line is the load-bearing one:
-the exported graph and the trained network are held to the same numbers
-under onnxruntime — the exact runtime the platform's inference host uses.
-The trained bundle lands in the same slot `task build` used —
-`agents/walker/out/bundle` — so `match` and `upload` don't care which path
-produced it.
-
-For a policy that actually walks, `STEPS=64` becomes millions and
-`NUM_ENVS=8`; the brief's REWARD paragraph tells you what the gradient will
-look like before you spend the compute. See the README's
-[reward landscape](README.md#the-reward-landscape-read-before-a-long-run)
-note first.
-
-## Data environments: the supervised recipe
-
-Some environments are not control problems at all: you see a
-transaction, a ticket, a sensor window, and decide; what was actually
-true arrives later — as a row of a *feedback window* (an observation
-whose rows are the decisions that resolved this tick, with columns saying
-how old each one is, what you decided and what was true) or as the reward
-`reward_lag_ticks` later. `task info` shows both: the window's columns
-with their units, or a `REWARD LAG` line.
-
-When the declaration reveals its truth that way, `task create-agent`
-writes where to find it into `agent.toml`:
-
-```toml
-[supervised]
-value = "feedback"
-age_col = "age_ticks"
-decision_col = "your_decision"
-truth_col = "truth"
-valid_col = "valid"
-action = "decision"
-```
-
-and the second recipe reads it:
-
-```sh
-task train AGENT=triager RECIPE=supervised SEEDS=16 EPOCHS=20
-```
+The end of a run looks like this:
 
 ```
-── network: agents/triager/model.py (build_policy)
-── supervised training <slug> [<mode>] over 16 seeds, 20 epochs
-  label source: rows of `feedback` — columns age_ticks / your_decision / truth (rows with valid = 0 are padding)
-  collected 3812 labelled observations from 16 seeds (4800 ticks, 0 labels with no observation to join) in 3.1s
-  classification over declared codes {0: 3488, 1: 324}
-  epoch   1/20  train_loss=0.6421  val_loss=0.5133  val_accuracy=0.812     3.9s
+Practice seeds 0-9 (never trained on), the exported model (2 s):
+  seed   policy        do-nothing
+     0     55.70 completed   20.00 completed
+     1     77.25 completed   20.00 loss-cap
   …
-→ weights: agents/triager/out/policy.pt
-→ onnx: agents/triager/out/policy.onnx (160022 bytes)
-✓ torch/onnxruntime parity: max abs diff 7.451e-08
-→ bundle: agents/triager/out/bundle
+  mean   56.553        20.0
+Self-check:
+  ok      bundle my-policy/: lockstep.toml v3, kind policy, card-fraud
+  ok      model 73,612 bytes; inputs payment, card, …; outputs decision logits, confidence [-1, 1]
+  ok      opset, operators, fixed shapes and sizes within Lockstep's preflight rules
+  ok      torch and the export agree on 1000 recorded observations: …
 ```
 
-The engine ran over 16 public seeds playing the neutral action; every
-revealed truth was joined back to the observation it belongs to
-(`lockstep_train.LabelledStream`, the same join you can use in your own
-loop); a classifier head was fit on the `model.py` trunk with the rare
-class weighted up; and the export keeps the declared signature — the
-prediction lands on the declared action as its code, everything else
-neutral. `agents/triager/out/supervised.csv` has the per-epoch numbers.
-The bundle is the same shape as a PPO one, so `task match` and `task
-upload` do not care which recipe made it.
+Practice seed `n` is the same match `lockstep run --seed n` plays, so you
+can watch any of them. The private scenarios Lockstep scores you on are
+different seeds of the same kind, so expect a similar but not identical
+mean.
 
-Where the truth lives is never guessed: the block above is generated from
-the declaration's own column names. If an environment names them
-differently, edit the block (`task info` shows the names), or say it on
-the command line — `.venv/bin/python -m train.main --agent triager
---recipe supervised --label-value <obs>` or `--reward-lag <ticks>`. An
-agent whose declaration reveals no truth gets no block, and the recipe
-refuses with that reason instead of training on nothing.
+`training/my-policy/` in your invite's folder keeps the run: `weights.pt`
+(the network), `metrics.csv` (one row per PPO update: the score of recent
+matches, the losses), `evaluation.json` (the table above).
 
-## Part 4 — reading a match
+## 6. Check it as Lockstep will
 
-The archive is the whole match, deterministically replayable. Drop
-`out/archive.bin` on <https://assignments.lockstep.it/replay> to watch it rendered
-(its **View results** button shows the graded view before playback even
-starts), or read the same thing in the terminal — `task match` prints it
-at the end, and `task report` prints it again for any archive
-(`ARCHIVE=<path>`): pass/fail, score, the headline metrics, then every
-metric with its label and unit — exactly the row this match would be on
-an assessment report. Matches end when the engine says so — the brief's
-ENDS paragraph — never on a wall clock.
-
-## Debugging: logs, stepping, reruns
-
-go1-beacon seats one agent, so `task build` printed no opponents hint. In an
-environment with two or more seats it adds one — `OPPONENTS="other-bot"` —
-and `task match AGENT=walker OPPONENTS="other-bot"` puts your second agent in
-seat 1.
-
-To watch a match tick by tick:
+In your invite's folder:
 
 ```sh
-task match AGENT=walker STEP=1
+cd ../acme-card-fraud
+lockstep check --agent my-policy
 ```
 
-After every tick the match stops and asks:
+This runs Lockstep's own checks on your bundle, the same ones it runs when
+you submit, and plays one practice match through Lockstep's ONNX shell:
 
 ```
-── tick 0 done · Enter: next tick · c: run to the end · N: run to tick N · q: stop ▸
+What Lockstep checks when you submit:
+  ok      made for interface_version 1, the environment's (from its lockstep.toml)
+  ok      the bundle is 66 KB (at most 95 MiB)
+  ok      a trained policy the ONNX shell can play
+A practice match on seed 0 (1 seat, your agent in it):
+  ok      finished at turn 2000: completed, score 55.7
+  ok      no bad turns: 2,000 turns played, none crashed, ran out of fuel or sent an invalid output
+  ok      fuel: the busiest turn used 215,937 of the 1,000,000 a turn may use (22%); …
 ```
 
-Enter plays one more tick, `c` runs to the end, `12` runs to tick 12 and asks
-again, and `q` stops with the archive of what was played. `UNTIL=12` does the
-running for you and pauses at tick 12.
+The score is the one step 5 showed for seed 0: training, the self-check and
+Lockstep all play your model the same way. **Fuel** is Lockstep's measure
+of work: your model's turn must fit the environment's budget. A bigger
+network costs more; `check` tells you how much of the budget you use.
 
-Add `LOGS=1` to see what walker sees and does. It is a trained graph, so it
-cannot print — the shell that runs it prints for it:
+## 7. Watch a match
 
 ```sh
-task match AGENT=walker LOGS=1 UNTIL=1
+lockstep run --agent my-policy --seed 3
 ```
 
-```
-[seat 0 · init] ONNX policy `policy`: feeding obs f32[54] · reading action f32[12] (in [-1, 1], mapped onto the declared bounds)
-[seat 0 · t0] reward 0
-[seat 0 · t0] obs[trunk_quat] = [0.9998 0 0 -0.0214]
-[seat 0 · t0] obs[trunk_angvel] = [0 0 0]
-[seat 0 · t0] obs[trunk_linvel] = [0 0 0]
-[seat 0 · t0] obs[joint_pos] = [0 0.9 -1.8 0 0.9 -1.8 0 0.9 … 12 values]
-[seat 0 · t0] obs[joint_vel] = [0 0 0 0 0 0 0 0 … 12 values]
-[seat 0 · t0] obs[last_action] = [0 0.9 -1.8 0 0.9 -1.8 0 0.9 … 12 values]
-[seat 0 · t0] obs[beacon_body] = [-2.7623 2.7626 -0.12]
-[seat 0 · t0] obs[beacon_dist] = 3.9067
-[seat 0 · t0] obs[time_left] = 1
-[seat 0 · t0] obs[gravity_body] = [0 0 -1]
-[seat 0 · t0] → action: fr=[0 1.9075 -1.853] fl=[0 1.9075 -1.853] rr=[0 1.9075 -1.853] rl=[0 1.9075 -1.853]
-[seat 0 · t1] reward 4.9952
-…
-```
+It plays practice seed 3, prints the result and saves the match in
+`.lockstep/runs/<n>/match.archive`. Open
+<https://app.lockstep.it/replay> and drop that file on the page: the
+replay plays in your browser, and the file stays on your machine.
 
-Every observation is named by the same slices `interface.py` uses, and the
-action is in the declared units, after the `[-1, 1]` outputs were mapped onto
-each joint's range. If the policy ever plays the neutral action instead, a
-line says why (no model in the bundle, outputs of the wrong width, an
-inference error). To look inside the network itself, run the environment in
-your own loop — `gymnasium.make("Lockstep/Env-v0", engine_source=...)` — and
-`print` or use `pdb` there. The Rust and C agents below print whatever you
-tell them to; see [their section](#the-advanced-track-rust-and-c).
+## 8. Make it better
 
-Every run of `task match` is the same match: the seed is fixed, and your
-agent's own randomness is seeded from it. What you see at tick 12 today is
-what you see at tick 12 tomorrow, until you change the agent.
+- **Train longer**: `MINUTES=30`. Watch `training/my-policy/metrics.csv`:
+  when `mean_score` stops rising, more time won't help much.
+- **Change the network** in `train/policy.py`: wider layers (`-- --hidden
+  128`), a different trunk, a convolution for an image input. Keep one
+  output per head. Lockstep allows a fixed set of ONNX operators (no
+  `Flatten`, `GELU`, `Slice` or embedding lookups on inputs, for
+  example); the self-check names any operator it refuses, and `lockstep
+  check` reports the fuel.
+- **Change the reward**: `-- --reward score` trains on the final score
+  only; `-- --reward series:<key>` on a series the environment declares.
+- **Change the supervised labels**: `train/supervised.py`'s
+  `label_to_index` decides which code each truth trains. Card-fraud's
+  `confidence` output stays at 0.5 with this recipe, and its score gives
+  10 points for a calibrated confidence: training it is a good next step.
+- **Two-seat environments**: by default the other seat plays at random.
+  `-- --opponents my-policy-v1` makes it play an earlier export of yours
+  (any policy bundle folder in the invite's folder), so you can train
+  generation by generation:
 
-## Part 5 — submit
+  ```sh
+  task train FOLDER=../acme-joust NAME=my-policy-v1
+  task train FOLDER=../acme-joust NAME=my-policy-v2 -- --opponents my-policy-v1
+  ```
+
+  `lockstep-train` 1.0 drives one seat at a time: both seats learning at
+  once (self-play) isn't in it yet.
+- **Write your own loop.** `lockstep_train.make(folder)` is a Gymnasium
+  environment and `lockstep_train.make_vec(folder, 8)` a vector
+  environment, with observation and action spaces that are exactly the
+  ONNX shell's. Any RL library works; export with `train/export.py` and
+  check with `task selfcheck FOLDER=…`.
+
+Each run writes `my-policy/` again. Use `NAME=` to keep several (`NAME=v2`
+writes `v2/` and `training/v2/`) and `lockstep check --agent v2` to check
+one.
+
+## 9. Submit
+
+When you are happy with a policy:
 
 ```sh
-task upload AGENT=walker ASSESSMENT=<id>
+cd ../acme-card-fraud
+lockstep submit --agent my-policy --source ../lockstep-template/train
 ```
 
-```
-uploaded bundle agents/…/8c7b581b54e499ae….wasm (1199629 bytes, sha256 7e1491b8…)
-        mode: "create",
-        verification: "verified",
-        display_name: "walker",
-        mode_key: "default",
-        latest_revision_number: 1,
-        latest_revision_status: Verified,
-```
+`submit` runs `lockstep check` first, then asks once: **a candidate's
+submission is final.** If Lockstep doesn't accept it (the same checks as
+step 6), it doesn't count and you can submit again. `--source` sends your
+training code too, so the company can read how you made the policy; it
+is optional. Lockstep then plays your policy on 20 private scenarios (up
+to an hour), and your invite's page shows what happens next.
 
-(Condensed — the CLI prints the full upload record. `verification:
-"verified"` is the line that matters: the platform re-ran your bundle
-against the live engine and accepted it, payload schema and all.)
+## How Lockstep plays your model
 
-The upload that names your **hiring assessment** — the exact command,
-id included, is on the assessment's Ship step — is your submission. It
-asks you to confirm first, it is final, and later uploads to it are
-refused, so `task match` until you are happy first. Then the Result step
-fills in as the scenarios run.
+You don't need this to train, but it explains the export. Lockstep's ONNX
+shell runs your `policy.onnx` once per turn:
 
-If a company gave you **learner access** instead, upload without
-`ASSESSMENT=` — `task upload AGENT=walker` — and run the build on the
-suite from the Submit step, as often as you like; re-upload as a revision
-with `task upload AGENT=walker AGENT_ID=<id>`. Anyone else's upload that
-names no assessment is refused: there is nothing else it could be.
+- It feeds one model input per declared input, by name, shape `[1, …]`:
+  float32 as the environment sends it (a u8 input divided by 255), or
+  int32. Your model may leave inputs out.
+- It reads one model output per action head. A number output is one tensor
+  of values in −1 to 1: −1 becomes the output's low bound, 1 its high
+  bound. A coded output gives one score (logit) per code, and the shell
+  plays the code with the highest score. An output with slices or columns
+  has one head per slice or column, named `<output>.<part>`.
+- The model has no other outputs (training's value network is left out),
+  fixed shapes, batch 1, opset 17, and every weight inside the file.
 
-By default an upload also
-sends the text files under `agents/<name>/` as an employer-visible source
-archive — see the README's
-[assessment recipe](README.md#recipes) for exactly what the employer
-receives (replays, metrics, notes, source, an interview guide) and the two
-options an invite may carry (hand-written-only, a follow-up round).
+`lockstep_train`'s spaces follow these rules exactly, which is why the
+policy plays the same in training and once submitted. The full rules are
+in `.lockstep/sdk/docs/onnx-shell.md` of any starter `lockstep agent new`
+makes.
 
-## The advanced track: Rust and C
+## If something goes wrong
 
-The python paths above never leave ONNX. The other two languages ship a
-component you wrote yourself — no ONNX, no Python at match time, and the
-whole thing still starts from the engine's declaration:
-
-```sh
-task setup LANGS=rust                                    # once
-task create-agent NAME=ferrous ENV=go1-beacon LANG=rust
-task build AGENT=ferrous
-task match AGENT=ferrous
-```
-
-The scaffold is a complete cargo project: the vendored WIT world, the
-hand-written wire reader (`src/wire.rs`, ~530 dependency-free lines pinned
-by the spec goldens under `reference/rust-wire/`), a generated
-`src/interface.rs`, and `src/lib.rs` — yours — answering the neutral
-action until you edit `on_tick`. The interface carries the same header
-and constants as the Python one (every slice a `Range<usize>` with its
-doc and unit, every column a `COL_<NAME>` index) and then typed access in
-Rust's own terms: `Obs::read(&view)` decodes the view into a struct with
-one method per value returning its natural type — `&[f32; 54]` here, a
-`&[[f32; 8]; 16]` for a history window, `&[u8]` for an image — and
-`Action { fr: [0.0, 0.9, -1.8], ..Action::neutral() }.encode()` builds
-the input by name:
-
-```rust
-let Some(obs) = Obs::read(&view) else { return Vec::new() };
-// `obs[trunk_quat]` — trunk orientation
-let _first = &obs.obs()[interface::obs::obs::TRUNK_QUAT];
-Action::neutral().encode()
-```
-
-`task build` compiles it to a `wasm32-wasip2` component and bundles it;
-the same `task match`/`task upload` run it.
-
-C is the same shape:
-
-```sh
-task setup LANGS=c        # finds /opt/wasi-sdk or $WASI_SDK, else downloads the pinned wasi-sdk
-task create-agent NAME=clanger ENV=go1-beacon LANG=c
-task build AGENT=clanger
-task match AGENT=clanger
-```
-
-`agents/clanger/` holds `wire.h`/`wire.c` (the C99 twin of the Rust
-reader, pinned by the same goldens under `reference/c-wire/`), a generated
-`interface.h`, `agent.c` — yours — and a one-clang-line `build.sh`:
-wit-bindgen generates the world bindings, wasi-sdk's clang links the
-component directly. The header is the same declaration again as
-`#define`s (`OBS_OBS_TRUNK_QUAT_START` / `_LEN`, `OBS_<VALUE>_ROWS` /
-`_COLS` / `_COL_<NAME>`, the shape and bounds arrays) plus typed access:
-`obs_obs(&view, out)` copies the value into a declaration-shaped array
-(`float out[16][8]` for a window; a `u8` value is borrowed as bytes), and
-`agent_action_t` with `agent_action_neutral` / `agent_action_encode`
-builds the input by named field:
-
-```c
-float obs[54];
-if (obs_obs(&view, obs)) {
-    float first = obs[OBS_OBS_TRUNK_QUAT_START];   /* trunk orientation */
-}
-agent_action_t action;
-agent_action_neutral(&action);
-agent_action_encode(&action, &ret->ptr, &ret->len);
-```
-
-Bytes in, bytes out.
-
-Both stubs carry one commented-out line in `on_tick` that prints the
-observation they read. Uncomment it, rebuild, and run with `LOGS=1`:
-
-```sh
-task build AGENT=ferrous
-task match AGENT=ferrous LOGS=1 UNTIL=3
-```
-
-```
-[seat 0 · t0] obs[trunk_quat] = [0.99977034, 0.0, 0.0, -0.021429313]
-[seat 0 · t1] obs[trunk_quat] = [0.9997204, -0.00026506706, -0.010025185, -0.021413336]
-[seat 0 · t2] obs[trunk_quat] = [0.99929297, -0.0008493755, -0.030921118, -0.021372195]
-[seat 0 · t3] obs[trunk_quat] = [0.99839395, -0.0014255666, -0.052468058, -0.021320194]
-── tick 3 done · Enter: next tick · c: run to the end · N: run to tick N · q: stop ▸
-```
-
-That is the neutral stance tipping over: the quaternion is `wxyz`, and its
-`y` component (pitch) grows a little every tick until the Go1 falls at
-tick 12, the fall Part 2 described.
-
-Every line is tagged with the seat and tick it was written in. Print as much
-as you like while you work: nothing leaves your machine, and evaluated
-matches throw agent output away.
-
-## Two seats learning at once
-
-On a duel environment — two seats, one winner (`task info ENV=<slug>`
-says how many seats a mode has) — plain `task train` trains seat 0 while
-seat 1 plays neutral. `PARALLEL=1` trains BOTH seats with one shared policy
-over the generic PettingZoo view — the classic first rung of self-play:
-
-```sh
-task create-agent NAME=duelist ENV=<slug>
-task train AGENT=duelist PARALLEL=1 STEPS=128
-```
-
-```
-── self-play training <slug> [<mode>] for 128 seat-steps (both seats learning, one shared policy)
-→ onnx: agents/duelist/out/policy.onnx (1279116 bytes)
-✓ torch/onnxruntime parity: max abs diff 7.451e-08
-→ bundle: agents/duelist/out/bundle
-```
-
-Every seat's transition lands in the same PPO buffer; the exported
-artifact is unchanged (one `policy.onnx`), so `task match` and `task
-upload` work identically.
-
-## Where to go from here
-
-- Swap the training loop for your own stack — the env is plain
-  `gymnasium.make("Lockstep/Env-v0", engine_source=...)`, your
-  generated `interface.py` names every feature, and `model.py` is yours
-  to rewrite; the README's [BYO section](README.md#commands) is the seam.
-- On a data environment, start from `RECIPE=supervised` and compare it
-  with PPO on the same seeds — `task match` scores both with the same
-  engine.
-- Try another environment: `task info ENV=panda-pick`, then
-  `task create-agent NAME=picky ENV=panda-pick` — same commands, a MuJoCo
-  arm, its own brief.
-- Read the wire spec ([docs/wire.md](docs/wire.md)) and port the reader to
-  your favorite language — `reference/rust-wire/` and `reference/c-wire/`
-  are the worked examples, pinned by the spec's own goldens.
+- **`isn't an invite's folder`**: pass the folder `lockstep invite get`
+  made (it has `.lockstep/declaration.json`).
+- **The physics files or the ONNX shell are missing** (robot
+  environments, or training against an earlier policy): run `lockstep run`
+  once in the invite's folder; it fetches them.
+- **`lockstep check` says the model was made for another version**: the
+  company updated the environment. Run `lockstep invite get` again, then
+  train again.
+- **The self-check FAILED on "torch and the export agree"**: something in
+  your network exports differently (a Python `if` on values, an operator
+  ONNX does differently). The line says which head.

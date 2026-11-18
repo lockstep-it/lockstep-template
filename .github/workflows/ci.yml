@@ -1,11 +1,16 @@
-# Proves the whole pipeline on every OS researchers actually use.
+# Trains, exports and checks on the committed invite folders (tests/fixtures)
+# on the three systems candidates use. No network to Lockstep: everything a
+# test needs is in this repo, plus PyPI for the Python packages.
 #
-# No environment is named here. CI asks the live platform what is published
-# (`python -m train.core.discovery --first`) and builds against the first
-# PUBLICLY published environment it answers with — the same discovery
-# `task envs` gives a researcher. The engine-backed steps then fetch that
-# release from the live CDN, so they go green with the first environments/
-# deploy and never need editing when the catalog changes.
+# lockstep-train comes from PyPI (`lockstep-train>=1.0,<2`). Before 1.0.0 is
+# published there, set the repository variable LOCKSTEP_TRAIN_SPEC to another
+# pip spec, for example
+#   --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple lockstep-train==1.0.0
+# after LOCKSTEP-PLATFORM's release workflow has published a TestPyPI build.
+#
+# Not run here: `lockstep check` (tests/test_lockstep_check.py), which needs
+# the released lockstep CLI and the runtime's ONNX shell, and panda-pick,
+# whose robot model is too large to commit. Both run locally (TUTORIAL.md).
 name: ci
 
 on:
@@ -14,16 +19,18 @@ on:
   pull_request:
 
 jobs:
-  pipeline:
+  train:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
+    env:
+      LOCKSTEP_TRAIN_SPEC: ${{ vars.LOCKSTEP_TRAIN_SPEC || 'lockstep-train>=1.0,<2' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -32,108 +39,31 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install CPU torch (Linux)
-        # The default Linux torch wheel drags the full CUDA stack (~2.5 GB)
-        # onto a runner with no GPU; the cpu index has the same version slim.
+      - name: CPU torch (Linux)
+        # The default Linux wheel brings the CUDA stack (~2.5 GB) to a
+        # runner with no GPU; the CPU index has the same version, slim.
         if: runner.os == 'Linux'
         run: pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-      - name: Install the training stack
+      - name: The training stack and lockstep-train
         run: |
-          pip install -r requirements.txt
-          pip install "lockstep-train[pettingzoo]>=0.6.0" pytest
+          pip install -r requirements.txt "pytest>=8"
+          pip install $LOCKSTEP_TRAIN_SPEC
+          python -c "import lockstep_train; print('lockstep-train', lockstep_train.__version__)"
 
-      - name: Pick an environment from the live platform (first publicly published slug)
-        # $GITHUB_ENV works under bash on every matrix OS, Windows included.
-        run: |
-          ENV="$(python -m train.core.discovery --first)"
-          echo "ENV=$ENV" >> "$GITHUB_ENV"
-          echo "building against: $ENV"
-
-      - name: Rust toolchain (the rust scaffold + the wire reference)
-        run: rustup target add wasm32-wasip2
-
-      - name: C toolchain (wasi-sdk + wit-bindgen, as `task setup LANGS=c` installs them)
-        # Runners have neither, so this exercises the real download path
-        # into out/toolchains/ — the same one a user without /opt/wasi-sdk
-        # hits.
-        run: python -m train.toolchain install c
-
-      - name: Lint (what `task lint` runs; CI has no Task)
+      - name: Lint (what `task lint` runs)
         if: runner.os == 'Linux'
         run: |
-          cargo fmt --manifest-path reference/rust-wire/Cargo.toml --check
-          cargo clippy --manifest-path reference/rust-wire/Cargo.toml --all-targets --quiet -- -D warnings
-          cc -std=c99 -Wall -Wextra -Werror -fsyntax-only reference/c-wire/wire.c reference/c-wire/test_wire.c
+          pip install "ruff==0.17.5"
+          ruff check .
+          ruff format --check .
 
-      - name: Wire references vs the spec goldens (Rust, then C natively where cc exists)
+      - name: Tests (256 PPO steps on each fixture, the export against the shell's rules, the self-check, determinism, the supervised smoke bar)
+        run: python -m pytest -q
+
+      - name: The tutorial's commands on a copy of the card-fraud folder
         run: |
-          cargo test --manifest-path reference/rust-wire/Cargo.toml --quiet
-          if command -v cc >/dev/null 2>&1; then
-            mkdir -p out
-            cc -std=c99 -Wall -Wextra -Werror -o out/test_wire reference/c-wire/test_wire.c reference/c-wire/wire.c -lm
-            ./out/test_wire reference/rust-wire/tests/fixtures
-          else
-            echo "no native cc on this runner — the C WASM build below still proves wire.c compiles"
-          fi
-
-      - name: Hermetic tests (scaffold generation, agent.toml, discovery vs a mock CDN, stage, export) + scaffold compile tests (rust + c → wasm components)
-        run: python -m pytest tests -q
-
-      - name: create-agent from the discovered environment's live release (python)
-        run: python -m train.scaffold --name ci-bot --env "$ENV"
-
-      - name: Build the hand-written (untrained) policy through export/stage
-        run: python -m train.build --agent ci-bot
-
-      - name: Engine-backed tests (SAME_STEP autoreset semantics, parallel env)
-        # The scaffold warmed the keyed cache, so these no longer skip.
-        run: python -m pytest tests -q
-
-      - name: Train through the full pipeline (tiny, vectorized, spawn workers)
-        run: python -m train.main --agent ci-bot --steps 256 --num-envs 2
-
-      - name: Self-play (PARALLEL) on the first public multi-seat mode
-        # Self-play needs two or more seats, and the first public
-        # environment above may have one, so this asks the platform for the
-        # first public mode that seats two (`--first-multiseat`) and trains
-        # its own agent there. Skipped only when the platform publishes none.
-        run: |
-          if ! PICK="$(python -m train.core.discovery --first-multiseat)"; then
-            echo "no public multi-seat mode on the platform: self-play skipped"
-            exit 0
-          fi
-          read -r SP_ENV SP_MODE <<<"$PICK"
-          echo "self-play against: $SP_ENV [$SP_MODE]"
-          python -m train.scaffold --name ci-selfplay --env "$SP_ENV" --mode "$SP_MODE"
-          ENGINE="$(find out/cache/"$SP_ENV"/"$SP_MODE" -name engine.wasm | head -1)"
-          SEATS="$(python -c 'import sys; from lockstep_train.env import LockstepParallelEnv as E; print(len(E(engine_source=sys.argv[1]).possible_agents))' "$ENGINE")"
-          test "$SEATS" -ge 2 || { echo "$SP_ENV [$SP_MODE] lists two or more seats but its engine has $SEATS"; exit 1; }
-          python -m train.main --agent ci-selfplay --steps 128 --parallel
-          test -f agents/ci-selfplay/out/policy.pt
-
-      - name: create-agent + build in Rust (component from the same declaration)
-        run: |
-          python -m train.scaffold --name ci-rust --env "$ENV" --lang rust
-          python -m train.build --agent ci-rust
-
-      - name: create-agent + build in C (wit-bindgen + wasi-sdk → component)
-        run: |
-          python -m train.scaffold --name ci-c --env "$ENV" --lang c
-          python -m train.build --agent ci-c
-
-      - name: Every staged bundle is a valid v2 manifest for its mode
-        run: |
-          python - <<'PY'
-          import os
-          import tomllib
-          for name, kind in (("ci-bot", "onnx"), ("ci-rust", "component"), ("ci-c", "component")):
-              m = tomllib.loads(open(f"agents/{name}/out/bundle/lockstep.toml", encoding="utf-8").read())
-              assert m["schema_version"] == 2 and m["environment"] == os.environ["ENV"], (name, m)
-              has_policy = "artifacts" in m and "policy" in m.get("artifacts", {})
-              assert has_policy == (kind == "onnx"), (name, m)
-              prov = m["provenance"]
-              assert prov["tool"] == "lockstep-template" and prov["kind"] in ("trained", "built"), (name, prov)
-              assert (prov["kind"] == "trained") == ("steps" in prov), (name, prov)
-              print(f"bundle ok: {name} -> {m['environment']} [{m['mode']}] psv {m['payload_schema_version']}")
-          PY
+          cp -R tests/fixtures/card-fraud "$RUNNER_TEMP/acme-card-fraud"
+          python -m train.main --folder "$RUNNER_TEMP/acme-card-fraud" --recipe supervised
+          python -m train.selfcheck --folder "$RUNNER_TEMP/acme-card-fraud"
+          python -m train.evaluate --folder "$RUNNER_TEMP/acme-card-fraud" --seeds 3

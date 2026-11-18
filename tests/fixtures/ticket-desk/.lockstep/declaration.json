@@ -1,0 +1,479 @@
+{
+  "format": 1,
+  "name": "ticket-desk",
+  "version": "0.2.0",
+  "interface_version": 1,
+  "title": "Ticket desk",
+  "summary": "Route 3,000 support tickets to eight queues and flag the urgent ones while the words change.",
+  "brief": {
+    "goal": "You are a support desk's router. One ticket arrives each turn, 3,000 in all: its text as word ids, and what the desk knows about the customer. Send it to one of eight queues and say whether it is a P1 (urgent). You have 150 P1 flags. The words are in the release file `vocab.txt`. Between turns 1,000 and 2,200 new product names and error strings appear; on some seeds one queue's words change too, or what counts as a P1 shifts. The truth comes two turns later, in `feedback`.",
+    "scoring": "Out of 100, over resolved tickets. **Routing, 55:** 55 × the mean credit: 1 for the right queue, ½ for an adjacent one (3 to 5 pairs a seed, not shown), ¼ for `general`, 0 for any other. **P1, 25:** 15 × the share of true P1s you flagged, plus 10 × the share of the desk's flags that were on P1s. **Change, 20:** 20 × accuracy after the change ÷ max(accuracy before it, 0.3), capped at 20; 0 if the match ends early.",
+    "ending": "After 3,000 tickets (completed). Early, as a failure, when you have asked for more than 450 P1s (p1-storm), or when the mean credit of the last 300 resolved tickets falls below ¼, what sending everything to `general` earns (collapse).",
+    "reward": "Each turn: the change in score as a ticket resolves, plus 0.02 for a P1 you flagged and minus 0.02 for one you missed. The extras are taken back on the last turn, so the rewards add up to the score."
+  },
+  "seats": {"exact": 1},
+  "turn_rate": 20,
+  "max_turns": 3000,
+  "inputs": [
+    {
+      "name": "tokens",
+      "doc": "The ticket's text as 128 word ids, in reading order: the subject line, then the body, then 0s after the text ends.\n\nId n is the word on line n of the release file `vocab.txt` (4,095 lines of lowercase letters, line 1 is id 1), which comes with the practice files. To turn a text into ids, split it on spaces and replace each word by its line number. The words are made up: what they mean is learnt from the tickets.\n\nThe ids are laid out in groups, the same on every seed:\n\n| Ids | Group |\n|---|---|\n| 1–360 | support wording every queue uses |\n| 361–400 | urgency, outage and security markers |\n| 401–2320 | the queues' own words: queue q (as in `queue`) owns 401 + 240q to 640 + 240q |\n| 2321–3200 | product names and error strings that appear only after the change |\n| 3201–4095 | filler; 3701–3900 are order ids and 3901–4095 error codes |\n\nEach seed gives a queue 60 to 120 of its 240 ids and lends some of them to a similar queue, so a word's block is a strong hint, not the answer. About 0 to 10% of words are typos: an id moved 1 to 3 places.",
+      "dtype": "i32",
+      "shape": [128],
+      "bounds": {"low": 0, "high": 4095},
+      "unit": "word id"
+    },
+    {
+      "name": "ticket",
+      "doc": "What the desk knows about the ticket before anyone reads it.",
+      "dtype": "f32",
+      "shape": [11],
+      "bounds": {"low": -1, "high": 128},
+      "slices": [
+        {
+          "name": "tier",
+          "doc": "The customer's plan.",
+          "count": 1,
+          "bounds": {"low": 0, "high": 3},
+          "codes": [
+            {"value": 0, "label": "free"},
+            {"value": 1, "label": "pro"},
+            {"value": 2, "label": "business"},
+            {"value": 3, "label": "enterprise"}
+          ]
+        },
+        {
+          "name": "age",
+          "doc": "How long the ticket has waited.",
+          "unit": "hours",
+          "count": 1,
+          "bounds": {"low": 0, "high": 72}
+        },
+        {
+          "name": "attachments",
+          "doc": "Files attached to it.",
+          "unit": "files",
+          "count": 1,
+          "bounds": {"low": 0, "high": 3}
+        },
+        {
+          "name": "has_error_code",
+          "doc": "1 if the text has an error code (ids 3901–4095), else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "has_order_id",
+          "doc": "1 if the text has an order id (ids 3701–3900), else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "prior_tickets",
+          "doc": "This customer's tickets in the last 30 days.",
+          "unit": "tickets",
+          "count": 1,
+          "bounds": {"low": 0, "high": 10}
+        },
+        {
+          "name": "reopened",
+          "doc": "1 if it reopens a closed ticket, else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "sentiment",
+          "doc": "The desk's mood score of the text: −1 angry to 1 happy.",
+          "unit": "score",
+          "count": 1,
+          "bounds": {"low": -1, "high": 1}
+        },
+        {
+          "name": "length",
+          "doc": "Words in the text: the ids in `tokens` that are not 0.",
+          "unit": "words",
+          "count": 1,
+          "bounds": {"low": 0, "high": 128}
+        },
+        {
+          "name": "hour",
+          "doc": "Local hour of day when it arrived.",
+          "unit": "hours",
+          "count": 1,
+          "bounds": {"low": 0, "high": 24}
+        },
+        {
+          "name": "weekend",
+          "doc": "1 on a Saturday or Sunday, else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        }
+      ]
+    },
+    {
+      "name": "p1_flags_left",
+      "doc": "P1 flags the desk can still raise for you. A request with none left still routes the ticket, at normal priority.",
+      "dtype": "f32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 150},
+      "unit": "flags"
+    },
+    {
+      "name": "progress",
+      "doc": "Share of the match played: 0 at the first ticket, 0.9997 at the last.",
+      "dtype": "f32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 1},
+      "unit": "ratio"
+    },
+    {
+      "name": "feedback",
+      "doc": "The truth about the ticket you routed two turns ago, now that a person has picked it up. On the first two turns there is none: all zeros, with `valid` 0.",
+      "dtype": "f32",
+      "shape": [4],
+      "bounds": {"low": 0, "high": 7},
+      "slices": [
+        {
+          "name": "queue",
+          "doc": "The queue you sent it to.",
+          "count": 1,
+          "bounds": {"low": 0, "high": 7},
+          "codes": [
+            {"value": 0, "label": "general"},
+            {"value": 1, "label": "billing"},
+            {"value": 2, "label": "account-access"},
+            {"value": 3, "label": "bug-report"},
+            {"value": 4, "label": "feature-request"},
+            {"value": 5, "label": "shipping"},
+            {"value": 6, "label": "refunds"},
+            {"value": 7, "label": "abuse-safety"}
+          ]
+        },
+        {
+          "name": "true_queue",
+          "doc": "The queue it belonged in.",
+          "count": 1,
+          "bounds": {"low": 0, "high": 7},
+          "codes": [
+            {"value": 0, "label": "general"},
+            {"value": 1, "label": "billing"},
+            {"value": 2, "label": "account-access"},
+            {"value": 3, "label": "bug-report"},
+            {"value": 4, "label": "feature-request"},
+            {"value": 5, "label": "shipping"},
+            {"value": 6, "label": "refunds"},
+            {"value": 7, "label": "abuse-safety"}
+          ]
+        },
+        {
+          "name": "was_p1",
+          "doc": "1 if it was a P1, else 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        },
+        {
+          "name": "valid",
+          "doc": "1 for a real result, 0 when there is none.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {"low": 0, "high": 1}
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "queue",
+      "doc": "Where to send this turn's ticket.",
+      "dtype": "i32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 7},
+      "codes": [
+        {
+          "value": 0,
+          "label": "general",
+          "doc": "The holding queue. Only 4–10% of tickets belong here; any other ticket earns ¼."
+        },
+        {"value": 1, "label": "billing"},
+        {"value": 2, "label": "account-access"},
+        {"value": 3, "label": "bug-report"},
+        {"value": 4, "label": "feature-request"},
+        {"value": 5, "label": "shipping"},
+        {"value": 6, "label": "refunds"},
+        {"value": 7, "label": "abuse-safety"}
+      ]
+    },
+    {
+      "name": "p1",
+      "doc": "1 asks the desk to raise a P1 flag on this ticket, 0 is normal priority. The desk raises the first 150 requests; later ones still route the ticket at normal priority, and more than 450 requests end the match.",
+      "dtype": "i32",
+      "shape": [],
+      "bounds": {"low": 0, "high": 1},
+      "unit": "flag"
+    }
+  ],
+  "no_action": "Send the ticket to `general` at normal priority: a quarter of a point at worst, never a P1 request.",
+  "budgets": {"turn_fuel": 1000000, "init_fuel": 8000000, "setup_fuel": 16000000, "step_fuel": 800000},
+  "stats": [
+    {
+      "key": "score",
+      "label": "Score",
+      "doc": "The three terms in Scoring, added.",
+      "unit": "pts",
+      "kind": "measure",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "routing-accuracy",
+      "label": "Routing accuracy",
+      "doc": "Share of resolved tickets sent to exactly the right queue.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "p1-recall",
+      "label": "P1 recall",
+      "doc": "Share of the true P1s the desk flagged for you.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "p1-precision",
+      "label": "P1 precision",
+      "doc": "Share of the flags the desk raised that were on true P1s.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "general-rate",
+      "label": "Sent to general",
+      "doc": "Share of resolved tickets you sent to `general`: doubt when it is low, a habit when it is not.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "lower",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "accuracy-before-drift",
+      "label": "Accuracy before the change",
+      "doc": "Routing accuracy on the tickets that arrived before the change.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "accuracy-after-drift",
+      "label": "Accuracy after the change",
+      "doc": "Routing accuracy on the tickets that arrived from the change on; 0 if the match ended before it.",
+      "unit": "ratio",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "drift-recovery-turns",
+      "label": "Recovery after the change",
+      "doc": "Turns from the change until accuracy over the last 200 resolved tickets came back within 0.05 of what it was at the change, counted once 200 tickets from after it had resolved. 3,000 when it never did.",
+      "unit": "turns",
+      "kind": "duration",
+      "better": "lower",
+      "across_seeds": "mean"
+    }
+  ],
+  "endings": [
+    {
+      "key": "completed",
+      "label": "All tickets routed",
+      "doc": "3,000 tickets routed.",
+      "outcome": "success"
+    },
+    {
+      "key": "p1-storm",
+      "label": "P1 storm",
+      "doc": "More than 450 P1 requests: three times the 150 flags.",
+      "outcome": "failure"
+    },
+    {
+      "key": "collapse",
+      "label": "Routing collapse",
+      "doc": "The mean credit of the last 300 resolved tickets fell below ¼, what sending everything to `general` earns.",
+      "outcome": "failure"
+    }
+  ],
+  "facts": [
+    {
+      "key": "drift-turn",
+      "label": "Change",
+      "doc": "The turn whose ticket is the first one from after the change.",
+      "unit": "turns"
+    },
+    {
+      "key": "drift-kind",
+      "label": "What changed",
+      "doc": "What the change did besides bringing new product names.",
+      "codes": [
+        {"value": 0, "label": "new names only"},
+        {"value": 1, "label": "a queue's words", "doc": "One queue lost 30–60% of its words to new ones."},
+        {"value": 2, "label": "the P1 rule", "doc": "What counts as a P1 shifted."},
+        {"value": 3, "label": "both", "doc": "A queue's words and the P1 rule."}
+      ]
+    },
+    {
+      "key": "p1-share",
+      "label": "P1 share",
+      "doc": "Share of the match's tickets that were P1s.",
+      "unit": "ratio"
+    },
+    {
+      "key": "typo-rate",
+      "label": "Typo rate",
+      "doc": "Share of words replaced by a nearby id.",
+      "unit": "ratio"
+    },
+    {
+      "key": "adjacent-pairs",
+      "label": "Adjacent queues",
+      "doc": "Which queue pairs earned half credit, as bits added: bit k is the k-th pair (i, j), i < j, in the order (0, 1), (0, 2) … (6, 7).",
+      "unit": "bitmask"
+    },
+    {
+      "key": "confusable-share",
+      "label": "Borrowed words",
+      "doc": "How much of a queue's words came from its similar queue, as a share of its own: the seed's routing difficulty.",
+      "unit": "ratio"
+    },
+    {
+      "key": "new-token-share",
+      "label": "Tickets with new words",
+      "doc": "Share of the tickets from after the change with at least one new product name or error string.",
+      "unit": "ratio"
+    }
+  ],
+  "series": [
+    {
+      "key": "rolling-accuracy",
+      "label": "Accuracy, last 200",
+      "doc": "Routing accuracy over the last 200 resolved tickets. No sample until one has resolved.",
+      "unit": "ratio",
+      "scope": "per_seat",
+      "range": {"low": 0, "high": 1}
+    },
+    {
+      "key": "p1-recall",
+      "label": "P1 recall so far",
+      "doc": "Share of the true P1s resolved so far that were flagged. No sample until one has resolved.",
+      "unit": "ratio",
+      "scope": "per_seat",
+      "range": {"low": 0, "high": 1}
+    },
+    {
+      "key": "p1-flags-left",
+      "label": "P1 flags left",
+      "doc": "Flags the desk can still raise.",
+      "unit": "flags",
+      "scope": "per_seat",
+      "range": {"low": 0, "high": 150}
+    },
+    {
+      "key": "new-token-share",
+      "label": "Tickets with new words",
+      "doc": "Share of the tickets from after the change so far with a new product name or error string; 0 before the change.",
+      "unit": "ratio",
+      "scope": "session",
+      "range": {"low": 0, "high": 1}
+    }
+  ],
+  "events": [
+    {"key": "drift", "label": "New words", "doc": "New product names and error strings started to appear."},
+    {"key": "queue-rotated", "label": "A queue's words changed", "doc": "One queue's words changed at the change."},
+    {"key": "p1-rule-shifted", "label": "P1 rule shifted", "doc": "What counts as a P1 shifted at the change."},
+    {"key": "p1-missed", "label": "P1 missed", "doc": "A true P1 resolved without a flag."},
+    {"key": "p1-flags-used-up", "label": "P1 flags used up", "doc": "The desk raised its 150th flag."}
+  ],
+  "replay": {
+    "table": {
+      "columns": [
+        {"name": "turn", "label": "Turn", "unit": "turn", "kind": "integer"},
+        {
+          "name": "tier",
+          "label": "Tier",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "free"},
+            {"value": 1, "label": "pro"},
+            {"value": 2, "label": "business"},
+            {"value": 3, "label": "enterprise"}
+          ]
+        },
+        {"name": "ticket", "label": "Ticket", "kind": "text"},
+        {
+          "name": "queue",
+          "label": "Sent to",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "general"},
+            {"value": 1, "label": "billing"},
+            {"value": 2, "label": "account-access"},
+            {"value": 3, "label": "bug-report"},
+            {"value": 4, "label": "feature-request"},
+            {"value": 5, "label": "shipping"},
+            {"value": 6, "label": "refunds"},
+            {"value": 7, "label": "abuse-safety"}
+          ]
+        },
+        {
+          "name": "true_queue",
+          "label": "Belonged in",
+          "kind": "code",
+          "codes": [
+            {"value": 0, "label": "general"},
+            {"value": 1, "label": "billing"},
+            {"value": 2, "label": "account-access"},
+            {"value": 3, "label": "bug-report"},
+            {"value": 4, "label": "feature-request"},
+            {"value": 5, "label": "shipping"},
+            {"value": 6, "label": "refunds"},
+            {"value": 7, "label": "abuse-safety"}
+          ]
+        },
+        {"name": "p1", "label": "P1 asked", "unit": "flag", "kind": "integer"},
+        {"name": "was_p1", "label": "Was P1", "unit": "flag", "kind": "integer"},
+        {"name": "credit", "label": "Credit", "unit": "pts", "kind": "number"}
+      ],
+      "confusion": {"truth": "true_queue", "verdict": "queue"}
+    }
+  },
+  "tags": [
+    "domain:operations",
+    "skill:classification",
+    "skill:cost-sensitive-decisions",
+    "skill:online-adaptation",
+    "modality:text",
+    "modality:tabular",
+    "role:ml-engineer",
+    "role:data-scientist",
+    "role:nlp-engineer",
+    "method:supervised-friendly",
+    "method:handwritten-friendly",
+    "level:entry",
+    "data:procedural",
+    "adversary:static",
+    "budget:none"
+  ]
+}

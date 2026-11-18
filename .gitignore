@@ -1,28 +1,18 @@
-# Secrets: the API key lives in .env, never in git (.env.example is the template)
-.env
-.env.*
-!.env.example
-
-# The repo-local toolchain `task setup` provisions
+# The repo-local Python environment `task setup` makes
 .venv/
 
-# Everything the template generates outside agents/: the keyed engine cache
-# (out/cache/), downloaded toolchains (out/toolchains/), match archives,
-# training runs made with --env, the C wire test binary
+# Anything a local run writes here (training writes into the invite's folder)
 out/
-
-# Per-agent build products (task build / task train); the sources are yours
-agents/*/out/
-agents/*/target/
-agents/*/gen/
-
-# The Rust wire reference's cargo build
-reference/rust-wire/target/
 
 # Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
+
+# A key in a .env file never belongs in git
+.env
+.env.*
 
 # OS
 .DS_Store

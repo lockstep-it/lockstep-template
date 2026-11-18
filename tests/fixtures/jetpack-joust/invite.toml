@@ -1,0 +1,9 @@
+# What this folder is for, written by the lockstep CLI: don't edit it.
+# `lockstep invite get` (or `training get`) writes it again.
+format = 1
+invite = "inv_fixture"
+environment = "lockstep/jetpack-joust"
+version = "0.6.0"
+interface_version = 1
+seats_min = 2
+seats_max = 2

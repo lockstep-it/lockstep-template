@@ -1,0 +1,466 @@
+{
+  "format": 1,
+  "name": "jetpack-joust",
+  "version": "0.6.0",
+  "interface_version": 1,
+  "title": "Jetpack Joust",
+  "summary": "Fly a jetpack robot and out-joust another robot in a 60-second duel.",
+  "brief": {
+    "goal": "You fly a jetpack robot in a 60-second joust against another robot, in an arena 80 m in radius under a 50 m ceiling, with six platforms to land on. Land your lance on its body and keep its lance off yours.\n\nEach turn, send a thrust and a turn rate, and whether to strike. The jet burns or it doesn't: once lit it burns at least 20 turns, once cut it stays cold 24, so flight is a rhythm of burns and falls under 2.4× earth's gravity. A strike runs on its own: the lance extends in a quarter second, holds, retracts and recharges, about 1.5 s in all.\n\nThe other robot is a house bot, or in practice a copy of your own agent. You see it only while your chase camera does.",
+    "scoring": "A lance hit on the other robot's body is +1 to you and −1 to it. A hit while your lance is still extending is a power hit: it also knocks the victim back and staggers its turning for a second. The same robot can score on the other again only after half a second. Shields stop lances; blocks and knockouts score nothing.\n\nScore: 50 + 2 × your hit differential (hits landed less hits taken), within 0 to 100. 50 is even; 100 is 25 hits ahead.",
+    "ending": "Every match runs 3,600 turns: 60 seconds at 60 turns a second. Touching the floor or leaving the arena knocks you out for two seconds, then you respawn where you started. The higher differential places first; more time at 10 to 40 m breaks a tie.",
+    "reward": "Your change in hit differential this turn: +1, −1 or 0."
+  },
+  "seats": {
+    "exact": 2
+  },
+  "turn_rate": 60,
+  "max_turns": 3600,
+  "inputs": [
+    {
+      "name": "me",
+      "doc": "Your robot. Positions are in your own frame of the arena: you start on −z facing +z, toward where the other robot starts, and the arena's axis is x = z = 0. Both seats see the arena this way.",
+      "dtype": "f32",
+      "shape": [
+        12
+      ],
+      "bounds": {
+        "low": -100,
+        "high": 100
+      },
+      "slices": [
+        {
+          "name": "position",
+          "doc": "Where you are in your frame of the arena: x and z from the arena's axis, y above the floor.",
+          "unit": "m",
+          "count": 3,
+          "bounds": {
+            "low": -100,
+            "high": 100
+          }
+        },
+        {
+          "name": "yaw",
+          "doc": "Your heading: 0 faces +z, positive is turned to your left (counter-clockwise seen from above).",
+          "unit": "rad",
+          "count": 1,
+          "bounds": {
+            "low": -3.1416,
+            "high": 3.1416
+          }
+        },
+        {
+          "name": "velocity",
+          "doc": "Your velocity in your robot's frame: x to your left, y up, z forward.",
+          "unit": "m/s",
+          "count": 3,
+          "bounds": {
+            "low": -100,
+            "high": 100
+          }
+        },
+        {
+          "name": "jet",
+          "doc": "The thrust your jet is burning this turn, in your robot's frame, each part a share of its maximum. All 0 while the jet is cold.",
+          "unit": "share",
+          "count": 3,
+          "bounds": {
+            "low": -1,
+            "high": 1
+          }
+        },
+        {
+          "name": "lance",
+          "doc": "How far your lance is out: 0 retracted (3.8 m of reach), 1 full (7.9 m).",
+          "unit": "share",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 1
+          }
+        },
+        {
+          "name": "down",
+          "doc": "Turns until you respawn after a knockout (120 to 1); 0 while you fly.",
+          "unit": "turns",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 120
+          }
+        }
+      ]
+    },
+    {
+      "name": "other",
+      "doc": "The other robot, relative to yours, while your chase camera can see any part of it, its lance included. The camera sits behind and above you and sees 60° up and down at 16:9.",
+      "dtype": "f32",
+      "shape": [
+        13
+      ],
+      "bounds": {
+        "low": -200,
+        "high": 200
+      },
+      "slices": [
+        {
+          "name": "visible",
+          "doc": "1 while your chase camera can see the other robot, else 0 and every other part is 0.",
+          "unit": "flag",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 1
+          }
+        },
+        {
+          "name": "position",
+          "doc": "Its position less yours, in your robot's frame: x to your left, y up, z forward.",
+          "unit": "m",
+          "count": 3,
+          "bounds": {
+            "low": -200,
+            "high": 200
+          }
+        },
+        {
+          "name": "velocity",
+          "doc": "Its velocity less yours, in your robot's frame.",
+          "unit": "m/s",
+          "count": 3,
+          "bounds": {
+            "low": -200,
+            "high": 200
+          }
+        },
+        {
+          "name": "yaw",
+          "doc": "Its heading less yours: 0 it faces the way you face; ±π it faces back toward you.",
+          "unit": "rad",
+          "count": 1,
+          "bounds": {
+            "low": -3.1416,
+            "high": 3.1416
+          }
+        },
+        {
+          "name": "jet",
+          "doc": "The thrust its jet is burning this turn, in its own robot's frame.",
+          "unit": "share",
+          "count": 3,
+          "bounds": {
+            "low": -1,
+            "high": 1
+          }
+        },
+        {
+          "name": "lance",
+          "doc": "How far its lance is out, 0 to 1. Rising means a strike is coming.",
+          "unit": "share",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 1
+          }
+        },
+        {
+          "name": "down",
+          "doc": "Turns until it respawns; 0 while it flies.",
+          "unit": "turns",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 120
+          }
+        }
+      ]
+    },
+    {
+      "name": "match",
+      "doc": "Your match so far.",
+      "dtype": "f32",
+      "shape": [
+        3
+      ],
+      "bounds": {
+        "low": -120,
+        "high": 3600
+      },
+      "slices": [
+        {
+          "name": "differential",
+          "doc": "Hits you landed less hits you took.",
+          "unit": "hits",
+          "count": 1,
+          "bounds": {
+            "low": -120,
+            "high": 120
+          }
+        },
+        {
+          "name": "falls",
+          "doc": "Your knockouts so far.",
+          "unit": "falls",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 40
+          }
+        },
+        {
+          "name": "turn",
+          "doc": "This turn's number, 0 to 3,600.",
+          "unit": "turns",
+          "count": 1,
+          "bounds": {
+            "low": 0,
+            "high": 3600
+          }
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "flight",
+      "doc": "Your jet and your turn.",
+      "dtype": "f32",
+      "shape": [
+        4
+      ],
+      "bounds": {
+        "low": -1,
+        "high": 1
+      },
+      "unit": "share",
+      "slices": [
+        {
+          "name": "thrust",
+          "doc": "Thrust in your robot's frame: x to your left, y up, z forward, each a share of its maximum (up lifts 2.2× your weight; forward and sideways push 1×). The jet lights only when this vector's length is 0.55 or more, so hovering in place (about 0.45 up) is impossible: burn and fall.",
+          "count": 3
+        },
+        {
+          "name": "yaw",
+          "doc": "Turn rate: 1 is half a turn a second to your left (counter-clockwise from above), −1 to your right.",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "strike",
+      "doc": "Fire the lance. A strike only fires when the lance is ready; once fired it runs on its own.",
+      "dtype": "u8",
+      "shape": [],
+      "bounds": {
+        "low": 0,
+        "high": 1
+      },
+      "codes": [
+        {
+          "value": 0,
+          "label": "hold"
+        },
+        {
+          "value": 1,
+          "label": "strike",
+          "doc": "Fire if the lance is ready; ignored mid-cycle."
+        }
+      ]
+    }
+  ],
+  "no_action": "No thrust and no turn (a lit jet still finishes its 20-turn burn, then you fall), no strike.",
+  "budgets": {
+    "turn_fuel": 2500000,
+    "init_fuel": 32000000,
+    "setup_fuel": 8000000,
+    "step_fuel": 50000000
+  },
+  "stats": [
+    {
+      "key": "score",
+      "label": "Score",
+      "doc": "50 + 2 × the hit differential, within 0 to 100: 50 is even with the other robot.",
+      "unit": "pts",
+      "kind": "measure",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "differential",
+      "label": "Hit differential",
+      "doc": "Hits landed less hits taken.",
+      "unit": "hits",
+      "kind": "measure",
+      "better": "higher",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "hits",
+      "label": "Hits",
+      "doc": "Lance hits landed on the other robot's body.",
+      "unit": "hits",
+      "kind": "count",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "hits-taken",
+      "label": "Hits taken",
+      "doc": "The other robot's lance hits on yours.",
+      "unit": "hits",
+      "kind": "count",
+      "better": "lower",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "power-hits",
+      "label": "Power hits",
+      "doc": "Hits landed while your lance was still extending.",
+      "unit": "hits",
+      "kind": "count",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "blocks",
+      "label": "Blocks",
+      "doc": "Strikes of the other robot's lance your shield caught.",
+      "unit": "blocks",
+      "kind": "count",
+      "better": "higher",
+      "across_seeds": "mean"
+    },
+    {
+      "key": "falls",
+      "label": "Knockouts",
+      "doc": "Times you touched the floor or left the arena.",
+      "unit": "falls",
+      "kind": "count",
+      "better": "lower",
+      "across_seeds": "mean",
+      "headline": true
+    },
+    {
+      "key": "band-time",
+      "label": "Band time",
+      "doc": "Share of the match you flew at 10 to 40 m: the tiebreak.",
+      "unit": "share",
+      "kind": "ratio",
+      "better": "higher",
+      "across_seeds": "mean"
+    }
+  ],
+  "endings": [
+    {
+      "key": "time-up",
+      "label": "Time up",
+      "doc": "The 60 seconds ran out. Every match ends this way.",
+      "outcome": "neutral"
+    }
+  ],
+  "facts": [
+    {
+      "key": "spawn-height",
+      "label": "Spawn height",
+      "doc": "The height both robots start and respawn at.",
+      "unit": "m"
+    },
+    {
+      "key": "spawn-separation",
+      "label": "Spawn separation",
+      "doc": "The distance between the two spawn points.",
+      "unit": "m"
+    },
+    {
+      "key": "seat-0-side",
+      "label": "Seat 0's side",
+      "doc": "Which spawn seat 0 had. The arena isn't the same seen from the two spawns, so the seed deals them: half the seeds each way.",
+      "codes": [
+        {
+          "value": 0,
+          "label": "minus-z",
+          "doc": "On −z, facing +z."
+        },
+        {
+          "value": 1,
+          "label": "plus-z",
+          "doc": "On +z, facing −z."
+        }
+      ]
+    }
+  ],
+  "series": [
+    {
+      "key": "differential",
+      "label": "Hit differential",
+      "doc": "Hits landed less hits taken so far.",
+      "unit": "hits",
+      "scope": "per_seat"
+    },
+    {
+      "key": "altitude",
+      "label": "Altitude",
+      "doc": "Height above the floor; no sample while knocked out.",
+      "unit": "m",
+      "scope": "per_seat",
+      "range": {
+        "low": 0,
+        "high": 60
+      }
+    },
+    {
+      "key": "distance",
+      "label": "Distance",
+      "doc": "Between the two robots; no sample while either is knocked out.",
+      "unit": "m",
+      "scope": "session",
+      "range": {
+        "low": 0,
+        "high": 170
+      }
+    }
+  ],
+  "events": [
+    {
+      "key": "hit",
+      "label": "Hit",
+      "doc": "A lance hit on a body; the event names the seat that landed it."
+    },
+    {
+      "key": "power-hit",
+      "label": "Power hit",
+      "doc": "A hit landed while the lance was still extending: knockback and a stagger."
+    },
+    {
+      "key": "block",
+      "label": "Block",
+      "doc": "A lance struck a shield; the event names the shield's seat."
+    },
+    {
+      "key": "knockout",
+      "label": "Knockout",
+      "doc": "A robot touched the floor or left the arena."
+    }
+  ],
+  "replay": {
+    "custom": {
+      "format": "jetpack-joust/frame@1"
+    }
+  },
+  "tags": [
+    "domain:games",
+    "skill:control",
+    "skill:sequential-decision",
+    "modality:physics-sim",
+    "role:controls-engineer",
+    "role:ml-engineer",
+    "method:handwritten-friendly",
+    "method:rl-friendly",
+    "level:mid",
+    "data:procedural",
+    "adversary:adaptive",
+    "budget:none"
+  ]
+}
